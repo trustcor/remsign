@@ -1,6 +1,6 @@
 # Remsign
 
-**TODO: Add description**
+A remote signing service in Elixir
 
 ## Installation
 
