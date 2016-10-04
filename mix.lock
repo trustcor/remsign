@@ -1,0 +1,6 @@
+%{"base64url": {:hex, :base64url, "0.0.1", "36a90125f5948e3afd7be97662a1504b934dd5dac78451ca6e9abf85a10286be", [:rebar], []},
+  "chumak": {:hex, :chumak, "1.1.2", "24dcf5b64f4e6869f15071b9c572d4c728f30b09b3a940663c488c896af9ed78", [:rebar3], []},
+  "honeydew": {:hex, :honeydew, "0.0.11", "dd8f07675651b01610e382e019aee3a151528eb4cd088ec17b33b7501d28e065", [:mix], []},
+  "jose": {:hex, :jose, "1.8.0", "1ee027c5c0ff3922e3bfe58f7891509e8f87f771ba609ee859e623cc60237574", [:mix, :rebar3], [{:base64url, "~> 0.0.1", [hex: :base64url, optional: false]}]},
+  "libdecaf": {:hex, :libdecaf, "0.0.4", "c1caa4c4aaea356f89372debd0a672251111c2b2236e1b1e8a0f5bc271b60af4", [:rebar3], []},
+  "libsodium": {:hex, :libsodium, "0.0.8", "3fe9bd6797dd612ec9483cce263b61350a7cf0056d6bf403ccbed606ede264f0", [:rebar3], []}}
