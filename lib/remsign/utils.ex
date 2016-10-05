@@ -5,4 +5,6 @@ defmodule Remsign.Utils do
       r -> r
     end
   end
+
+  def make_nonce, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 end

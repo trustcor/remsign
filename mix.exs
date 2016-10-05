@@ -16,7 +16,7 @@ defmodule Remsign.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :honeydew, :chumak]]
+    [applications: [:logger, :honeydew, :chumak, :poison, :timex]]
   end
 
   defp deps do
@@ -25,7 +25,10 @@ defmodule Remsign.Mixfile do
       {:chumak, "~> 1.1"},
       {:jose, "~> 1.8.0"},
       {:libsodium, "~> 0.0.8"},
-      {:libdecaf, "~> 0.0.4"}
+      {:libdecaf, "~> 0.0.4"},
+      {:poison, "~> 2.0.0"},
+      {:joken, "~> 1.3.1"},
+      {:timex, "~> 3.0.0"}
     ]
   end
 
