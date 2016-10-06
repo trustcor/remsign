@@ -16,7 +16,8 @@ defmodule Remsign.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :honeydew, :chumak, :poison, :timex]]
+    [applications: [:logger, :honeydew, :chumak, :poison, :timex,
+                    :briefly, :yamerl, :yaml_elixir ]]
   end
 
   defp deps do
@@ -28,7 +29,10 @@ defmodule Remsign.Mixfile do
       {:libdecaf, "~> 0.0.4"},
       {:poison, "~> 2.0.0"},
       {:joken, "~> 1.3.1"},
-      {:timex, "~> 3.0.0"}
+      {:timex, "~> 3.0.0"},
+      {:briefly, "~> 0.3.0"},
+      {:yaml_elixir, "~> 1.0.0"},
+      {:yamerl, github: "yakaz/yamerl"}
     ]
   end
 

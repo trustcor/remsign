@@ -1,4 +1,5 @@
 %{"base64url": {:hex, :base64url, "0.0.1", "36a90125f5948e3afd7be97662a1504b934dd5dac78451ca6e9abf85a10286be", [:rebar], []},
+  "briefly": {:hex, :briefly, "0.3.0", "16e6b76d2070ebc9cbd025fa85cf5dbaf52368c4bd896fb482b5a6b95a540c2f", [:mix], []},
   "certifi": {:hex, :certifi, "0.4.0", "a7966efb868b179023618d29a407548f70c52466bf1849b9e8ebd0e34b7ea11f", [:rebar3], []},
   "chumak": {:hex, :chumak, "1.1.2", "24dcf5b64f4e6869f15071b9c572d4c728f30b09b3a940663c488c896af9ed78", [:rebar3], []},
   "combine": {:hex, :combine, "0.9.2", "cd3c8721f378ebe032487d8a4fa2ced3181a456a3c21b16464da8c46904bb552", [:mix], []},
@@ -15,4 +16,6 @@
   "poison": {:hex, :poison, "2.0.1", "81248a36d1b602b17ea6556bfa8952492091f01af05173de11f8b297e2bbf088", [:mix], []},
   "ssl_verify_fun": {:hex, :ssl_verify_fun, "1.1.0", "edee20847c42e379bf91261db474ffbe373f8acb56e9079acb6038d4e0bf414f", [:rebar, :make], []},
   "timex": {:hex, :timex, "3.0.8", "71d5ebafcdc557c6c866cdc196c5054f587e7cd1118ad8937e2293d51fc85608", [:mix], [{:combine, "~> 0.7", [hex: :combine, optional: false]}, {:gettext, "~> 0.10", [hex: :gettext, optional: false]}, {:tzdata, "~> 0.1.8 or ~> 0.5", [hex: :tzdata, optional: false]}]},
-  "tzdata": {:hex, :tzdata, "0.5.9", "575be217b039057a47e133b72838cbe104fb5329b19906ea4e66857001c37edb", [:mix], [{:hackney, "~> 1.0", [hex: :hackney, optional: false]}]}}
+  "tzdata": {:hex, :tzdata, "0.5.9", "575be217b039057a47e133b72838cbe104fb5329b19906ea4e66857001c37edb", [:mix], [{:hackney, "~> 1.0", [hex: :hackney, optional: false]}]},
+  "yamerl": {:git, "https://github.com/yakaz/yamerl.git", "3f46bf06b9aa7c17ea6038dc8cf1ae078fc0c497", []},
+  "yaml_elixir": {:hex, :yaml_elixir, "1.0.0", "a0b703148aa8926a08fc14619c83e9cdf7555ff7e8bb9e74c08aa716eaf8c609", [:mix], []}}
