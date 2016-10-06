@@ -22,6 +22,12 @@ defmodule RemsignServerTest do
         %{ "public" => %{ "crv" => "Ed25519",
                           "kty" => "OKP",
                           "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE" }}
+      "secret-ecdsa" ->
+        %{ "public" => %{ "kty" => "EC",
+                          "crv" => "P-256",
+                          "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
+                          "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
+                        }}
       _ -> nil
     end
   end
@@ -103,15 +109,17 @@ defmodule RemsignServerTest do
   end
 
   defp screw_sig(msg) do
+    # flip the top bit on each byte of the signature component
+
     use Bitwise
 
     [h, p, s] = String.split(msg, ".", parts: 3)
-    IO.puts("#{inspect(s)}")
     {:ok, sv} = Base.url_decode64(s, padding: false)
-    s = :binary.bin_to_list(sv) |> Enum.map(fn x -> bxor(x, 128) end ) |> :binary.list_to_bin() |> Base.url_encode64(padding: false)
-    IO.puts("#{inspect(s)}")
+    Enum.join([h,p,:binary.bin_to_list(sv) |>
+                Enum.map(fn x -> bxor(x, 128) end ) |>
+                :binary.list_to_bin() |>
+                Base.url_encode64(padding: false)], ".")
 
-    Enum.join([h,p,s], ".")
   end
 
   test "send JWT message with ED25519", ctx do
@@ -126,6 +134,31 @@ defmodule RemsignServerTest do
     msg = %{ payload: %{ command: :health} } |>
       Joken.token |>
       Joken.with_sub("secret-ed") |>
+      Joken.with_iat(DateTime.utc_now) |>
+      Joken.with_jti(Remsign.Utils.make_nonce) |>
+      Joken.with_signer(k) |>
+      Joken.sign |>
+      Joken.get_compact
+    assert :chumak.send(sock, msg) == :ok
+    case :chumak.recv(sock) do
+      e ->
+        assert e == {:ok, Poison.encode!(%{ error: :unknown_command })}
+    end
+  end
+
+  test "send JWT message with ECDSA", ctx do
+    sock = connect(ctx)
+    k = Joken.Signer.es("ES256",
+      %{
+        "kty" => "EC",
+        "crv" => "P-256",
+        "d" => "0cXg0MW6FoWWPMf7gGOMQyLHkFGwRq0I34a24hiZ1DM",
+        "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
+        "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
+      })
+    msg = %{ payload: %{ command: :health} } |>
+      Joken.token |>
+      Joken.with_sub("secret-ecdsa") |>
       Joken.with_iat(DateTime.utc_now) |>
       Joken.with_jti(Remsign.Utils.make_nonce) |>
       Joken.with_signer(k) |>
