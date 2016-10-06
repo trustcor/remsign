@@ -6,30 +6,47 @@ defmodule RemsignServerTest do
       registrar: %{
         addr: "127.0.0.1",
         port: 25000,
-        clock_skew: 30
+        clock_skew: 30,
+        keyid: "secret-ed",
+        alg: "Ed25519"
       }
     }
     [cfg: cfg]
   end
 
-  def test_key_lookup(kid) do
-    case kid do
-      "secret-key" ->
-        %{ "public" => %{ "kty" => "oct",
-                          "k" => Base.url_encode64("secret", padding: false)
-                        }}
-      "secret-ed" ->
-        %{ "public" => %{ "crv" => "Ed25519",
-                          "kty" => "OKP",
-                          "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE" }}
-      "secret-ecdsa" ->
-        %{ "public" => %{ "kty" => "EC",
-                          "crv" => "P-256",
-                          "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
-                          "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
-                        }}
-      _ -> nil
-    end
+  def test_key_lookup("secret-ed", :private) do
+    %{
+      "crv" => "Ed25519",
+      "d" => "XONvUY25F9MUdwVreW701iA-FyBiUzIYKmDc1AWSGT0",
+      "kty" => "OKP",
+      "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE"
+    }
+  end
+
+  def test_key_lookup("secret-key", :public) do
+    %{ "kty" => "oct",
+       "k" => Base.url_encode64("secret", padding: false)
+    }
+  end
+
+  def test_key_lookup("secret-ed", :public) do
+    %{ "crv" => "Ed25519",
+       "kty" => "OKP",
+       "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE"
+    }
+  end
+
+  def test_key_lookup("secret-ecdsa", :public) do
+    %{ "kty" => "EC",
+       "crv" => "P-256",
+       "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
+       "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
+    }
+  end
+
+  def test_key_lookup(k, t) do
+    IO.puts("Cannot find #{inspect(t)}:#{inspect(k)}")
+    nil
   end
 
   def test_nonce_store(a, n) do
@@ -44,7 +61,7 @@ defmodule RemsignServerTest do
 
   def connect(ctx) do
     {:ok, a} = Agent.start_link(fn -> MapSet.new() end)
-    {:ok, _pid} = Remsign.Registrar.start_link( ctx[:cfg], &test_key_lookup/1,
+    {:ok, _pid} = Remsign.Registrar.start_link( ctx[:cfg], &test_key_lookup/2,
       fn n -> test_nonce_store(a, n) end )
 
     sock = case :chumak.socket(:req, 'test-reg-ident') do
@@ -103,8 +120,11 @@ defmodule RemsignServerTest do
       Joken.get_compact
     assert :chumak.send(sock, msg) == :ok
     case :chumak.recv(sock) do
+      {:ok, m} ->
+        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2)
+        assert msg == %{ "error" => "unknown_command" }
       e ->
-        assert e == {:ok, Poison.encode!(%{ error: :unknown_command })}
+        assert e == :fail
     end
   end
 
@@ -141,8 +161,11 @@ defmodule RemsignServerTest do
       Joken.get_compact
     assert :chumak.send(sock, msg) == :ok
     case :chumak.recv(sock) do
+      {:ok, m} ->
+        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2)
+        assert msg == %{ "error" => "unknown_command" }
       e ->
-        assert e == {:ok, Poison.encode!(%{ error: :unknown_command })}
+        assert e == :fail
     end
   end
 
@@ -166,8 +189,11 @@ defmodule RemsignServerTest do
       Joken.get_compact
     assert :chumak.send(sock, msg) == :ok
     case :chumak.recv(sock) do
+      {:ok, m} ->
+        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2)
+        assert msg == %{ "error" => "unknown_command" }
       e ->
-        assert e == {:ok, Poison.encode!(%{ error: :unknown_command })}
+        assert e == :fail
     end
   end
 

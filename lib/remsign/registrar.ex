@@ -18,7 +18,9 @@ defmodule Remsign.Registrar do
           end
     {:ok, %{ sock: sock, pid: pid, listener: spawn_link(fn -> listener(sock) end),
              klf: klf, nsf: nsf,
-             clock_skew: get_in_default(cfg, [:registrar, :clock_skew], 300)
+             clock_skew: get_in_default(cfg, [:registrar, :clock_skew], 300),
+             alg: get_in(cfg, [:registrar, :alg]),
+             keyid: get_in(cfg, [:registrar, :keyid])
            }
     }
   end
@@ -66,9 +68,21 @@ defmodule Remsign.Registrar do
       Joken.with_signer(
         %Joken.Signer{
           jws: %{ "alg" => alg },
-          jwk: k["public"]
+          jwk: k
         }) |>
       Joken.verify
+  end
+
+  defp envelope(st, m) do
+    %{ payload: m } |>
+      Joken.token |>
+      Joken.with_sub(st[:keyid]) |>
+      Joken.with_iat(DateTime.utc_now) |>
+      Joken.with_jti(Remsign.Utils.make_nonce) |>
+      Joken.with_signer( %Joken.Signer{ jws: %{ "alg" => st[:alg] },
+                                        jwk: st[:klf].(st[:keyid], :private) }) |>
+      Joken.sign |>
+      Joken.get_compact
   end
 
   def handle_cast({:message, "ping"}, st) do
@@ -92,7 +106,7 @@ defmodule Remsign.Registrar do
             {:ok, %{ "alg" => algo }} -> algo
             _ -> "HS256" # default
           end
-    k = st[:klf].(jp["sub"])
+    k = st[:klf].(jp["sub"], :public)
     ver = Joken.token(m) |>
       Joken.with_validation("iat", fn t -> validate_clock(t, st[:clock_skew]) end) |>
       Joken.with_validation("jti", fn n -> store_nonce(st, n) end) |>
@@ -101,7 +115,7 @@ defmodule Remsign.Registrar do
     case ver do
       %Joken.Token{error: nil} ->
         log(:info, "Message is #{inspect(jp["payload"])} verify => #{inspect(ver)}")
-        :chumak.send(st[:sock], Poison.encode!(%{ error: :unknown_command }))
+        :chumak.send(st[:sock], envelope(st, %{ error: :unknown_command }))
       %Joken.Token{error: "Invalid signature"} ->
         :chumak.send(st[:sock], Poison.encode!(%{ error: :invalid_signature }))
       %Joken.Token{error: "Invalid payload"} ->
