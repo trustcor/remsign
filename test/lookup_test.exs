@@ -11,10 +11,10 @@ defmodule RemsignLookupTest do
       ---
       name: Key 1
       algs:
-        - rs256
-        - rs384
-        - ps256
-        - ps384
+        - RS256
+        - RS384
+        - PS256
+        - PS384
       private: privkey.pem
       pass: file:privkey.pass
       public: pubkey.pem
@@ -39,6 +39,23 @@ defmodule RemsignLookupTest do
       { "d1/privkey.pass", "secretpass\n" }, # should strip the trailing whitespace
       { "d1/d1/f1.txt", "Test file 2" },
       { "d1/d2/f1.txt", "Test file 3" },
+      { "d1/d2/ecdsa.pem", """
+        -----BEGIN EC PRIVATE KEY-----
+        MHcCAQEEINHF4NDFuhaFljzH+4BjjEMix5BRsEatCN+GtuIYmdQzoAoGCCqGSM49
+        AwEHoUQDQgAE80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ/eC6kd0mpBeFEpTPgZT
+        jF1Fe5w4avhLWgILdFBensgjoBGSUEEWCw==
+        -----END EC PRIVATE KEY-----
+        """},
+      { "d1/d2/ecdsa.pub",
+        "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPNH797DnaZHkCetcrKehVHuTXDWvY1j5Sf3gupHdJqQXhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs= bar@quux" },
+      { "d1/d2/ecdsa.yml", """
+        ---
+        name: Key 2
+        algs:
+          - ES256
+        private: ecdsa.pem
+        public: ecdsa.pub
+        """},
       { "d1/d2/f2.txt", "Test file 4" },
       { "d3/f1.txt", "Test file 5" },
       { "d3/d2/f1.txt", "Test file 6" },
@@ -54,9 +71,9 @@ defmodule RemsignLookupTest do
       { "d3/d2/ossh.pub", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKBp2sOHUCimLijRbPK2H4ZlZMOvxSo15OKO5JgR6trB foo@bar" },
       { "d3/d2/ossh.yml", """
          ---
-         name: Key 2
+         name: Key 3
          algs:
-           - ed25519
+           - Ed25519
          private: osshpriv.pem
          public: ossh.pub
          """ }
@@ -87,7 +104,7 @@ defmodule RemsignLookupTest do
       [
         %{
           "name" => "Key 1",
-          "algs" => ["rs256", "rs384", "ps256", "ps384"],
+          "algs" => ["RS256", "RS384", "RS256", "RS384"],
           "private" => {
             %{kty: :jose_jwk_kty_rsa},
             %{
@@ -99,7 +116,9 @@ defmodule RemsignLookupTest do
               "n" => "nQEYxYhNRjwqQ5HQTsPuSCNIz4eUGqjYrfEP1Fyq0Tk",
               "p" => "ynUGKA5R4pNqSg9TqbBMww",
               "q" => "xobGNiRu5_mB9CKLkY96Uw",
-              "qi" => "WNjuNLi0IPts3V6IBfuXvg"}},
+              "qi" => "WNjuNLi0IPts3V6IBfuXvg"
+            }
+          },
           "public" => %{
             "e" => "AQAB",
             "kty" => "RSA",
@@ -108,7 +127,27 @@ defmodule RemsignLookupTest do
         },
         %{
           "name" => "Key 2",
-          "algs" => ["ed25519"],
+          "algs" => ["ES256"],
+          "private" => {
+            %{kty: :jose_jwk_kty_ec},
+            %{
+              "kty" => "EC",
+              "crv" => "P-256",
+              "d" => "0cXg0MW6FoWWPMf7gGOMQyLHkFGwRq0I34a24hiZ1DM",
+              "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
+              "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
+            }
+          },
+          "public" => %{
+            "kty" => "EC",
+            "crv" => "P-256",
+            "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
+            "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
+          }
+        },
+        %{
+          "name" => "Key 3",
+          "algs" => ["Ed25519"],
           "private" => {
             %{kty: :jose_jwk_kty_okp_ed25519},
             %{

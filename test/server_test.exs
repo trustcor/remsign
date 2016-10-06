@@ -14,7 +14,14 @@ defmodule RemsignServerTest do
 
   def test_key_lookup(kid) do
     case kid do
-      "secret-key" -> "secret"
+      "secret-key" ->
+        %{ "public" => %{ "kty" => "oct",
+                          "k" => Base.url_encode64("secret", padding: false)
+                        }}
+      "secret-ed" ->
+        %{ "public" => %{ "crv" => "Ed25519",
+                          "kty" => "OKP",
+                          "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE" }}
       _ -> nil
     end
   end
@@ -79,12 +86,13 @@ defmodule RemsignServerTest do
 
   test "send JWT message", ctx do
     sock = connect(ctx)
+    k = Joken.Signer.hs("HS256", "secret")
     msg = %{ payload: %{ command: :health} } |>
       Joken.token |>
       Joken.with_sub("secret-key") |>
       Joken.with_iat(DateTime.utc_now) |>
       Joken.with_jti(Remsign.Utils.make_nonce) |>
-      Joken.with_signer(Joken.hs256("secret")) |>
+      Joken.with_signer(k) |>
       Joken.sign |>
       Joken.get_compact
     assert :chumak.send(sock, msg) == :ok
@@ -94,14 +102,76 @@ defmodule RemsignServerTest do
     end
   end
 
+  defp screw_sig(msg) do
+    use Bitwise
+
+    [h, p, s] = String.split(msg, ".", parts: 3)
+    IO.puts("#{inspect(s)}")
+    {:ok, sv} = Base.url_decode64(s, padding: false)
+    s = :binary.bin_to_list(sv) |> Enum.map(fn x -> bxor(x, 128) end ) |> :binary.list_to_bin() |> Base.url_encode64(padding: false)
+    IO.puts("#{inspect(s)}")
+
+    Enum.join([h,p,s], ".")
+  end
+
+  test "send JWT message with ED25519", ctx do
+    sock = connect(ctx)
+    k = Joken.Signer.eddsa("Ed25519",
+      %{
+        "crv" => "Ed25519",
+        "d" => "XONvUY25F9MUdwVreW701iA-FyBiUzIYKmDc1AWSGT0",
+        "kty" => "OKP",
+        "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE"
+      })
+    msg = %{ payload: %{ command: :health} } |>
+      Joken.token |>
+      Joken.with_sub("secret-ed") |>
+      Joken.with_iat(DateTime.utc_now) |>
+      Joken.with_jti(Remsign.Utils.make_nonce) |>
+      Joken.with_signer(k) |>
+      Joken.sign |>
+      Joken.get_compact
+    assert :chumak.send(sock, msg) == :ok
+    case :chumak.recv(sock) do
+      e ->
+        assert e == {:ok, Poison.encode!(%{ error: :unknown_command })}
+    end
+  end
+
+  test "send JWT message with ED25519 (corrupt sig)", ctx do
+    sock = connect(ctx)
+    k = Joken.Signer.eddsa("Ed25519",
+      %{
+        "crv" => "Ed25519",
+        "d" => "XONvUY25F9MUdwVreW701iA-FyBiUzIYKmDc1AWSGT0",
+        "kty" => "OKP",
+        "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE"
+      })
+    msg = %{ payload: %{ command: :health} } |>
+      Joken.token |>
+      Joken.with_sub("secret-ed") |>
+      Joken.with_iat(DateTime.utc_now) |>
+      Joken.with_jti(Remsign.Utils.make_nonce) |>
+      Joken.with_signer(k) |>
+      Joken.sign |>
+      Joken.get_compact |>
+      screw_sig
+    assert :chumak.send(sock, msg) == :ok
+    case :chumak.recv(sock) do
+      e ->
+        assert e == {:ok, Poison.encode!(%{ error: :invalid_signature })}
+    end
+  end
+
   test "send duplicate JWT message", ctx do
     sock = connect(ctx)
+    k = Joken.Signer.hs("HS256", "secret")
     msg = %{ payload: %{ command: :health} } |>
       Joken.token |>
       Joken.with_sub("secret-key") |>
       Joken.with_iat(DateTime.utc_now) |>
       Joken.with_jti(Remsign.Utils.make_nonce) |>
-      Joken.with_signer(Joken.hs256("secret")) |>
+      Joken.with_signer(k) |>
       Joken.sign |>
       Joken.get_compact
     :chumak.send(sock, msg)
@@ -116,12 +186,13 @@ defmodule RemsignServerTest do
   test "send JWT message with old timestamp", ctx do
     sock = connect(ctx)
     {:ok, old_ts} = ((DateTime.utc_now |> DateTime.to_unix) - 60) |> DateTime.from_unix
+    k = Joken.Signer.hs("HS256", "secret")
     msg = %{ payload: %{ command: :health} } |>
       Joken.token |>
       Joken.with_sub("secret-key") |>
       Joken.with_iat(old_ts) |>
       Joken.with_jti(Remsign.Utils.make_nonce) |>
-      Joken.with_signer(Joken.hs256("secret")) |>
+      Joken.with_signer(k) |>
       Joken.sign |>
       Joken.get_compact
     assert :chumak.send(sock, msg) == :ok
@@ -133,12 +204,13 @@ defmodule RemsignServerTest do
 
   test "send JWT message with bad secret", ctx do
     sock = connect(ctx)
+    k = Joken.Signer.hs("HS256", "bad-secret")
     msg = %{ payload: %{ command: :health} } |>
       Joken.token |>
       Joken.with_sub("secret-key") |>
       Joken.with_iat(DateTime.utc_now) |>
       Joken.with_jti(Remsign.Utils.make_nonce) |>
-      Joken.with_signer(Joken.hs256("bad-secret")) |>
+      Joken.with_signer(k) |>
       Joken.sign |>
       Joken.get_compact
     assert :chumak.send(sock, msg) == :ok

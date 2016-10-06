@@ -60,9 +60,15 @@ defmodule Remsign.Registrar do
 
   defp store_nonce(st, n), do: st[:nsf].(n)
 
-  defp verify(e = {:error, _}, _), do: e
-  defp verify({:ok, m}, k) do
-    m |> Joken.with_signer(Joken.hs256(k)) |> Joken.verify
+  defp verify(e = {:error, _}, _, _), do: e
+  defp verify({:ok, m}, k, alg) do
+    m |>
+      Joken.with_signer(
+        %Joken.Signer{
+          jws: %{ "alg" => alg },
+          jwk: k["public"]
+        }) |>
+      Joken.verify
   end
 
   def handle_cast({:message, "ping"}, st) do
@@ -82,12 +88,16 @@ defmodule Remsign.Registrar do
 
   def handle_message(st, m) do
     {:ok, jp} = Joken.token(m) |> wrap |> jpeek
+    alg = case JOSE.JWS.peek_protected(m) |> Poison.decode do
+            {:ok, %{ "alg" => algo }} -> algo
+            _ -> "HS256" # default
+          end
     k = st[:klf].(jp["sub"])
     ver = Joken.token(m) |>
       Joken.with_validation("iat", fn t -> validate_clock(t, st[:clock_skew]) end) |>
       Joken.with_validation("jti", fn n -> store_nonce(st, n) end) |>
       wrap |>
-      verify(k)
+      verify(k, alg)
     case ver do
       %Joken.Token{error: nil} ->
         log(:info, "Message is #{inspect(jp["payload"])} verify => #{inspect(ver)}")
