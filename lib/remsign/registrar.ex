@@ -50,16 +50,6 @@ defmodule Remsign.Registrar do
     end
   end
 
-  defp validate_clock(t, skew) do
-    case Timex.parse(t, "{ISO:Extended:Z}") do
-      {:ok, ts} ->
-        abs(Timex.diff(DateTime.utc_now, ts, :seconds)) < skew
-      {:error, e} ->
-        log(:error, "Timestamp format for #{inspect(t)} invalid: #{inspect(e)}")
-        false
-    end
-  end
-
   defp store_nonce(st, n), do: st[:nsf].(n)
 
   defp verify(e = {:error, _}, _, _), do: e
@@ -71,6 +61,20 @@ defmodule Remsign.Registrar do
           jwk: k
         }) |>
       Joken.verify
+  end
+
+  def command_reply(_, %{ "command" => "health" }) do
+    %{ command: :health, response: :ok }
+  end
+
+  def command_reply(_, %{ "command" => "register", "params" => parms }) do
+    log(:info, "Register params = #{inspect(parms, pretty: true)}")
+    %{ command: :register, response: :ok }
+  end
+
+  def command_reply(_st, p) do
+    log(:warn, "Unknown command: #{inspect(p)}")
+    %{ error: :unknown_command }
   end
 
   defp envelope(st, m) do
@@ -107,15 +111,16 @@ defmodule Remsign.Registrar do
             _ -> "HS256" # default
           end
     k = st[:klf].(jp["sub"], :public)
+    log(:debug, "Verification key #{inspect(jp["sub"])} = #{inspect(k, pretty: true)}")
     ver = Joken.token(m) |>
-      Joken.with_validation("iat", fn t -> validate_clock(t, st[:clock_skew]) end) |>
+      Joken.with_validation("iat", fn t -> Remsign.Utils.validate_clock(t, st[:clock_skew]) end) |>
       Joken.with_validation("jti", fn n -> store_nonce(st, n) end) |>
       wrap |>
       verify(k, alg)
     case ver do
       %Joken.Token{error: nil} ->
-        log(:info, "Message is #{inspect(jp["payload"])} verify => #{inspect(ver)}")
-        :chumak.send(st[:sock], envelope(st, %{ error: :unknown_command }))
+        log(:debug, "Message verify => #{inspect(ver)}")
+        :chumak.send(st[:sock], envelope(st, command_reply(st, ver.claims)))
       %Joken.Token{error: "Invalid signature"} ->
         :chumak.send(st[:sock], Poison.encode!(%{ error: :invalid_signature }))
       %Joken.Token{error: "Invalid payload"} ->

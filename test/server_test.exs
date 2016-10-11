@@ -11,7 +11,8 @@ defmodule RemsignServerTest do
         alg: "Ed25519"
       }
     }
-    [cfg: cfg]
+    {:ok, a} = Agent.start_link(fn -> MapSet.new() end)
+    [cfg: cfg, nag: a]
   end
 
   def test_key_lookup("secret-ed", :private) do
@@ -60,9 +61,8 @@ defmodule RemsignServerTest do
   end
 
   def connect(ctx) do
-    {:ok, a} = Agent.start_link(fn -> MapSet.new() end)
     {:ok, _pid} = Remsign.Registrar.start_link( ctx[:cfg], &test_key_lookup/2,
-      fn n -> test_nonce_store(a, n) end )
+      fn n -> test_nonce_store(ctx[:nag], n) end )
 
     sock = case :chumak.socket(:req, 'test-reg-ident') do
              {:error, {:already_started, sockpid}} -> sockpid
@@ -107,6 +107,19 @@ defmodule RemsignServerTest do
     end
   end
 
+  test "build JWT message" do
+    s = Joken.Signer.hs("HS256", "secret")
+    assert Remsign.Utils.wrap(%{ payload: "message" }, "my-key", s,
+      ts: Timex.parse!("2010-12-01T13:14:15Z", "{ISO:Extended:Z}"),
+      nonce: << 1::64 >>) == String.replace("""
+      eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.
+      eyJwYXlsb2FkIjoibWVzc2FnZSIsImlhdCI6IjIwMTAtMTItMDFUMTM6MTQ6MTVaIi
+      wianRpIjoiXHUwMDAwXHUwMDAwXHUwMDAwXHUwMDAwXHUwMDAwXHUwMDAwXHUwMDAw
+      XHUwMDAxIiwic3ViIjoibXkta2V5In0.
+      Z7eVV5sID3xk2SpKetHWGuze3qrrszKaGYKkJ1rOnqQ
+      """, "\n", "")
+  end
+
   test "send JWT message", ctx do
     sock = connect(ctx)
     k = Joken.Signer.hs("HS256", "secret")
@@ -121,8 +134,10 @@ defmodule RemsignServerTest do
     assert :chumak.send(sock, msg) == :ok
     case :chumak.recv(sock) do
       {:ok, m} ->
-        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2)
-        assert msg == %{ "error" => "unknown_command" }
+        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2,
+        get_in(ctx, [:cfg, :registrar, :clock_skew]),
+        fn n -> test_nonce_store(ctx[:nag], n) end)
+        assert msg == %{"command" => "health", "response" => "ok"}
       e ->
         assert e == :fail
     end
@@ -162,8 +177,10 @@ defmodule RemsignServerTest do
     assert :chumak.send(sock, msg) == :ok
     case :chumak.recv(sock) do
       {:ok, m} ->
-        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2)
-        assert msg == %{ "error" => "unknown_command" }
+        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2,
+        get_in(ctx, [:cfg, :registrar, :clock_skew]),
+        fn n -> test_nonce_store(ctx[:nag], n) end)
+        assert msg == %{"command" => "health", "response" => "ok"}
       e ->
         assert e == :fail
     end
@@ -190,8 +207,10 @@ defmodule RemsignServerTest do
     assert :chumak.send(sock, msg) == :ok
     case :chumak.recv(sock) do
       {:ok, m} ->
-        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2)
-        assert msg == %{ "error" => "unknown_command" }
+        msg = Remsign.Utils.unwrap(m, &test_key_lookup/2,
+        get_in(ctx, [:cfg, :registrar, :clock_skew]),
+        fn n -> test_nonce_store(ctx[:nag], n) end)
+        assert msg == %{"command" => "health", "response" => "ok"}
       e ->
         assert e == :fail
     end

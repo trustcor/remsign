@@ -104,7 +104,7 @@ defmodule RemsignLookupTest do
       [
         %{
           "name" => "Key 1",
-          "algs" => ["RS256", "RS384", "RS256", "RS384"],
+          "algs" => ["RS256", "RS384", "PS256", "PS384"],
           "private" => {
             %{kty: :jose_jwk_kty_rsa},
             %{
