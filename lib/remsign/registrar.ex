@@ -117,21 +117,8 @@ defmodule Remsign.Registrar do
       Joken.get_compact
   end
 
-  def handle_cast({:message, "ping"}, st) do
-    :chumak.send(st[:sock], "pong")
-    {:noreply, st}
-  end
-
-  def handle_cast({:message, m}, st) do
-    jp = Joken.token(m) |> wrap |> jpeek
-    st = case jp do
-           {:ok, _dm} ->
-             handle_message(st, m)
-           {:error, e} ->
-             :chumak.send(st[:sock], Poison.encode!(%{ error: e }))
-             st
-         end
-    {:noreply, st}
+  def ping() do
+    GenServer.call __MODULE__, {:send, "ping"}
   end
 
   def handle_message(st, m) do
@@ -161,4 +148,38 @@ defmodule Remsign.Registrar do
         st
     end
   end
+
+  def handle_cast({:message, "ping"}, st) do
+    :chumak.send(st[:sock], "pong")
+    {:noreply, st}
+  end
+
+  def handle_cast({:message, m}, st) do
+    jp = Joken.token(m) |> wrap |> jpeek
+    st = case jp do
+           {:ok, _dm} ->
+             handle_message(st, m)
+           {:error, e} ->
+             :chumak.send(st[:sock], Poison.encode!(%{ error: e }))
+             st
+         end
+    {:noreply, st}
+  end
+
+  def handle_call({:send, "ping"}, _from, st) do
+    [d] = Enum.take_random(Map.keys(st[:dealers]), 1)
+    log(:info, "Dealer is #{inspect(d)}")
+    dsock = Map.get(st[:dealers], d) |> elem(1)
+
+    :ok = :chumak.send_multipart(dsock, ["", "ping"])
+    rep = case :chumak.recv_multipart(dsock) do
+            {:ok, ["", "pong"]} ->
+              "pong"
+            e ->
+              log(:info, "Reply to dealer socket: #{inspect(e)}")
+              e
+          end
+    {:reply, rep, st}
+  end
+
 end

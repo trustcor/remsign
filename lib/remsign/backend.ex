@@ -66,6 +66,8 @@ defmodule Remsign.Backend do
   end
 
   def handle_call(:register, _from, st) do
+    import Supervisor.Spec, warn: false
+
     pk = get_public_keys(st[:keys])
     msg = %{ command: "register",
              params: %{
@@ -77,13 +79,56 @@ defmodule Remsign.Backend do
     :chumak.send(st[:sock],m)
     r = case :chumak.recv(st[:sock]) do
           {:ok, rep} ->
-            Remsign.Utils.unwrap(rep, fn k, :public -> get_in(st, [:verification_keys, k]) end, st[:skew], &store_nonce/1) |>
+            rep = Remsign.Utils.unwrap(rep, fn k, :public -> get_in(st, [:verification_keys, k]) end, st[:skew], &store_nonce/1) |>
               handle_register_response(st)
+            hm = Map.get(rep, "hmac_key")
+            {:ok, hm} = Base.decode16(hm, case: :mixed)
+            port = Map.get(rep, "port")
 
+            children = [
+              Honeydew.child_spec(:backend_pool, Remsign.BackendWorker, { st[:host], port, hm }, workers: Map.get(st, :num_workers, 10))
+            ]
+            Supervisor.start_link(children, strategy: :one_for_one)
+            rep
           e ->
             log(:error, "Unexpected reply from register: #{inspect(e)}")
+            nil
         end
     {:reply, r, st}
   end
 
+end
+
+defmodule Remsign.BackendWorker do
+  use Honeydew
+  import Logger, only: [log: 2]
+
+  def init({host, port, hm}) do
+    wid = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+    sock = case :chumak.socket(:rep, String.to_charlist(wid)) do
+             {:error, {:already_started, sockpid}} -> sockpid
+             {:ok, sockpid} -> sockpid
+             e ->
+               log(:error, "#{inspect(e)} on chumak connect() received")
+               nil
+           end
+    {:ok, _pid} = :chumak.connect(sock, :tcp, String.to_charlist(host), port)
+    :timer.sleep(5)
+    log(:info, "Starting backend worker #{inspect(wid)} on #{inspect(host)}:#{inspect(port)}: HMAC = #{inspect(hm)}")
+    st = %{ id: wid, sock: sock, hmac: hm}
+    _pid = spawn_link(fn -> listener(sock, st) end)
+    {:ok, st}
+  end
+
+  def listener(sock, st) do
+    case :chumak.recv(sock) do
+      {:ok, "ping"} ->
+        log(:info, "Ping message received on #{st[:id]}")
+        :chumak.send(sock, "pong")
+      e ->
+        log(:info, "Unknown message received on #{st[:id]}: #{inspect(e)}")
+        :chumak.send(sock, Poison.encode(%{ error: :unknown_command }))
+    end
+    listener(sock, st)
+  end
 end

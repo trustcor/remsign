@@ -144,4 +144,28 @@ defmodule RemsignBackendTest do
     assert port == 21000
   end
 
+  test "registrar backend comms", ctx do
+    {:ok, _be} = Remsign.Backend.start_link(
+      %{
+        ident: "test-backend",
+        signkey: test_key_lookup("test-backend", :private),
+        signalg: "Ed25519",
+        keys: %{
+          "key2" => %{ "private" => test_key_lookup("key2", :private),
+                       "public" => test_key_lookup("key2", :public)
+                     }
+        },
+        verification_keys: %{
+          "test-dealer" => %{ "crv" => "Ed25519",
+                              "kty" => "OKP",
+                              "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
+                            }
+        },
+        host: get_in(ctx, [:cfg, :registrar, :addr]),
+        port: get_in(ctx, [:cfg, :registrar, :port])
+      }
+    )
+    reg = Remsign.Backend.register()
+    assert Remsign.Registrar.ping() == "pong"
+  end
 end
