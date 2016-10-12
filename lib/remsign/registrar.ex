@@ -73,11 +73,12 @@ defmodule Remsign.Registrar do
       nil ->
         log(:debug, "Creating new dealer for #{inspect(khash)}")
         {dport, dsock, _dpid} = Remsign.Dealer.alloc(%{ port_agent: st[:port_agent], base_port: st[:base_port] })
-        d = Map.get(st, :dealers, %{}) |> Map.put(khash, {dport, dsock})
-        kd = List.foldl(Map.keys(pubkeys), Map.get(st, :k2d, %{}), fn pk, m -> Map.put(m, pk, [{dport, dsock} | Map.get(m, pk, [])]) end)
-        {Map.put(st, :dealers, d) |> Map.put(:k2d, kd), dport}
-      {dport, _dsock } ->
-        {st, dport}
+        sk = :crypto.strong_rand_bytes(32)
+        d = Map.get(st, :dealers, %{}) |> Map.put(khash, {dport, dsock, sk})
+        kd = List.foldl(Map.keys(pubkeys), Map.get(st, :k2d, %{}), fn pk, m -> Map.put(m, pk, [{dport, dsock, sk} | Map.get(m, pk, [])]) end)
+        {Map.put(st, :dealers, d) |> Map.put(:k2d, kd), dport, sk}
+      {dport, _dsock, sk } ->
+        {st, dport, sk}
     end
   end
 
@@ -91,9 +92,8 @@ defmodule Remsign.Registrar do
     khash = pubkeys |>
       Enum.map(fn {_kn, pubkey} -> Remsign.Pubkey.keyid(pubkey) end) |>
       Enum.reduce(<< >>, fn (kh,acc) -> :crypto.hash(:sha, acc <> kh) end)
-    {st, dport} = new_dealer(st, khash, pubkeys)
-    sk = :crypto.strong_rand_bytes(32) |> Base.encode16(case: :lower)
-    {:ok, plaintext} = Poison.encode(%{ hmac_key: sk, port: dport })
+    {st, dport, sk} = new_dealer(st, khash, pubkeys)
+    {:ok, plaintext} = Poison.encode(%{ hmac_key: Base.encode16(sk, case: :lower), port: dport })
     {_alg, enc} = JOSE.JWE.block_encrypt(pub, plaintext, %{ "alg" => "RSA-OAEP", "enc" => "ChaCha20/Poly1305" })
     log(:debug, "Dealers = #{inspect(st[:dealers], pretty: true)}")
     log(:debug, "K2D = #{inspect(st[:k2d], pretty: true)}")
@@ -119,6 +119,10 @@ defmodule Remsign.Registrar do
 
   def ping() do
     GenServer.call __MODULE__, {:send, "ping"}
+  end
+
+  def sign(kid, htype, digest) do
+    GenServer.call __MODULE__, {:sign, kid, htype, digest}
   end
 
   def handle_message(st, m) do
@@ -166,18 +170,43 @@ defmodule Remsign.Registrar do
     {:noreply, st}
   end
 
+  def handle_call({:sign, kname, htype, digest}, _from, st) do
+    rep = case get_in(st, [:k2d, kname]) do
+            nil ->
+              log(:warn, "Unknown key #{kname} given")
+              {:error, :unknown_key}
+            bl when is_list(bl) ->
+              [{_dport, dsock, hm}] = Enum.take_random(bl, 1)
+              hmk = JOSE.JWK.from_oct(hm)
+              log(:info, "HMAC key = #{inspect(hmk)}")
+              msg = %{ payload: %{ command: :sign,
+                                   parms: %{ keyname: kname,
+                                             hash_type: htype,
+                                             digest: digest } } } |>
+                Remsign.Utils.wrap("backend-hmac", "HS256", hmk)
+              :ok = :chumak.send_multipart(dsock, ["", msg])
+              case :chumak.recv_multipart(dsock) do
+                {:ok, ["", r] } ->
+                  r
+                e ->
+                  log(:error, "Unexpected reply from backend: #{inspect(e)}")
+                  {:error, :unexpected_reply}
+              end
+          end
+    {:reply, rep, st}
+  end
+
   def handle_call({:send, "ping"}, _from, st) do
     [d] = Enum.take_random(Map.keys(st[:dealers]), 1)
-    log(:info, "Dealer is #{inspect(d)}")
     dsock = Map.get(st[:dealers], d) |> elem(1)
 
     :ok = :chumak.send_multipart(dsock, ["", "ping"])
     rep = case :chumak.recv_multipart(dsock) do
-            {:ok, ["", "pong"]} ->
-              "pong"
+            {:ok, ["", r = "pong"]} ->
+              r
             e ->
               log(:info, "Reply to dealer socket: #{inspect(e)}")
-              e
+              {:error, :unexpected_reply}
           end
     {:reply, rep, st}
   end

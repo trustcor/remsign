@@ -168,4 +168,52 @@ defmodule RemsignBackendTest do
     reg = Remsign.Backend.register()
     assert Remsign.Registrar.ping() == "pong"
   end
+
+  test "registrar backend signing with unknown key", ctx do
+    {:ok, _be} = Remsign.Backend.start_link(
+      %{
+        ident: "test-backend",
+        signkey: test_key_lookup("test-backend", :private),
+        signalg: "Ed25519",
+        keys: %{},
+        verification_keys: %{
+          "test-dealer" => %{ "crv" => "Ed25519",
+                              "kty" => "OKP",
+                              "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
+                            }
+        },
+        host: get_in(ctx, [:cfg, :registrar, :addr]),
+        port: get_in(ctx, [:cfg, :registrar, :port])
+      }
+    )
+    reg = Remsign.Backend.register()
+
+    assert Remsign.Registrar.sign("bad-key", :sha, << 0 :: 160 >>) == {:error, :unknown_key}
+  end
+
+  test "registrar backend signing", ctx do
+    {:ok, _be} = Remsign.Backend.start_link(
+      %{
+        ident: "test-backend",
+        signkey: test_key_lookup("test-backend", :private),
+        signalg: "Ed25519",
+        keys: %{
+          "key2" => %{ "private" => test_key_lookup("key2", :private),
+                       "public" => test_key_lookup("key2", :public)
+                     }
+        },
+        verification_keys: %{
+          "test-dealer" => %{ "crv" => "Ed25519",
+                              "kty" => "OKP",
+                              "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
+                            }
+        },
+        host: get_in(ctx, [:cfg, :registrar, :addr]),
+        port: get_in(ctx, [:cfg, :registrar, :port])
+      }
+    )
+    reg = Remsign.Backend.register()
+
+    assert Remsign.Registrar.sign("key2", :sha, << 0 :: 160 >>) == :expect_fail
+  end
 end

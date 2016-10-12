@@ -65,6 +65,10 @@ defmodule Remsign.Backend do
     { :error, :malformed_response }
   end
 
+  def handle_call({:store_nonce, n}, _from, st) do
+    {:reply, store_nonce(n), st}
+  end
+
   def handle_call(:register, _from, st) do
     import Supervisor.Spec, warn: false
 
@@ -86,7 +90,7 @@ defmodule Remsign.Backend do
             port = Map.get(rep, "port")
 
             children = [
-              Honeydew.child_spec(:backend_pool, Remsign.BackendWorker, { st[:host], port, hm }, workers: Map.get(st, :num_workers, 10))
+              Honeydew.child_spec(:backend_pool, Remsign.BackendWorker, { st, port, hm }, workers: Map.get(st, :num_workers, 10))
             ]
             Supervisor.start_link(children, strategy: :one_for_one)
             rep
@@ -103,7 +107,7 @@ defmodule Remsign.BackendWorker do
   use Honeydew
   import Logger, only: [log: 2]
 
-  def init({host, port, hm}) do
+  def init({st, port, hm}) do
     wid = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
     sock = case :chumak.socket(:rep, String.to_charlist(wid)) do
              {:error, {:already_started, sockpid}} -> sockpid
@@ -112,12 +116,41 @@ defmodule Remsign.BackendWorker do
                log(:error, "#{inspect(e)} on chumak connect() received")
                nil
            end
-    {:ok, _pid} = :chumak.connect(sock, :tcp, String.to_charlist(host), port)
+    {:ok, _pid} = :chumak.connect(sock, :tcp, String.to_charlist(st[:host]), port)
     :timer.sleep(5)
-    log(:info, "Starting backend worker #{inspect(wid)} on #{inspect(host)}:#{inspect(port)}: HMAC = #{inspect(hm)}")
-    st = %{ id: wid, sock: sock, hmac: hm}
+    log(:info, "Starting backend worker #{inspect(wid)} on #{inspect(st[:host])}:#{inspect(port)}: HMAC = #{inspect(hm)}")
+    st = Map.merge(st, %{ id: wid, sock: sock, hmac: hm})
     _pid = spawn_link(fn -> listener(sock, st) end)
     {:ok, st}
+  end
+
+  defp alg_from_keymap(%{ "crv" => "P-256", "kty" => "EC" }), do: "ES256"
+  defp alg_from_keymap(_), do: nil
+
+  defp command_reply("sign", %{ "keyname" => kname, "hash_type" => htype, "digest" => digest }, st ) do
+    case get_in(st, [:keys, kname, "private"]) do
+      nil ->
+        Poison.encode!(%{ error: :unknown_key })
+      km ->
+        k = JOSE.JWK.from_map(km) |>
+          JOSE.JWS.sign(digest, %{ "alg" => alg_from_keymap(km) } ) |>
+          JOSE.JWS.compact |>
+          elem(1) |>
+          Remsign.Utils.wrap("backend-key", "HS256", JOSE.JWK.from_oct(st[:hmac]))
+    end
+  end
+
+  defp command_reply(c, _, _st) do
+    log(:error, "Unknown command #{inspect(c)}")
+    Poison.encode!(%{ error: :unknown_command })
+  end
+
+  defp handle_message(m, st) do
+    msg = Remsign.Utils.unwrap(m,
+      fn _k, :public -> JOSE.JWK.from_oct(st[:hmac]) end,
+      st[:skew],
+      fn n -> GenServer.call Remsign.Backend, {:store_nonce, n} end)
+    command_reply(Map.get(msg, "command"), Map.get(msg, "parms"), st)
   end
 
   def listener(sock, st) do
@@ -125,6 +158,9 @@ defmodule Remsign.BackendWorker do
       {:ok, "ping"} ->
         log(:info, "Ping message received on #{st[:id]}")
         :chumak.send(sock, "pong")
+      {:ok, m} ->
+        rep = handle_message(m, st)
+        :chumak.send(sock, rep)
       e ->
         log(:info, "Unknown message received on #{st[:id]}: #{inspect(e)}")
         :chumak.send(sock, Poison.encode(%{ error: :unknown_command }))
