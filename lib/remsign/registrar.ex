@@ -89,6 +89,7 @@ defmodule Remsign.Registrar do
   def command_reply(st, %{ "command" => "register", "params" => parms }) do
     pub = Map.get(parms, "ekey") |> JOSE.JWK.from_map
     pubkeys = Map.get(parms, "pubkeys", %{})
+
     khash = pubkeys |>
       Enum.map(fn {_kn, pubkey} -> Remsign.Pubkey.keyid(pubkey) end) |>
       Enum.reduce(<< >>, fn (kh,acc) -> :crypto.hash(:sha, acc <> kh) end)

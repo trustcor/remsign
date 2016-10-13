@@ -53,6 +53,23 @@ defmodule RemsignBackendTest do
     }
   end
 
+  def test_key_lookup("key3", :private) do
+    %{
+      "crv" => "Ed25519",
+      "d" => "Ml05uJSjmIavqINFAJ1i3yJ65T0uyqjVwB7X1ehn4sg",
+      "kty" => "OKP",
+      "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
+    }
+  end
+
+  def test_key_lookup("key3", :public) do
+    %{
+      "crv" => "Ed25519",
+      "kty" => "OKP",
+      "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
+    }
+  end
+
   def test_key_lookup("test-dealer", :private) do
     %{
       "crv" => "Ed25519",
@@ -108,7 +125,7 @@ defmodule RemsignBackendTest do
     {:ok, cc} = ConCache.start(name: :test_nonce_cc)
     {:ok, pid} = Remsign.Registrar.start_link( cfg, &test_key_lookup/2,
       fn n -> Remsign.Utils.cc_store_nonce(cc, n) end )
-    [ cfg: cfg, nag: a, pid: pid ]
+    [ cfg: cfg, nag: a, pid: pid, cc: cc ]
   end
 
   test "register backend", ctx do
@@ -169,6 +186,53 @@ defmodule RemsignBackendTest do
     assert Remsign.Registrar.ping() == "pong"
   end
 
+  def kconfig(ctx, kn) do
+    %{
+      ident: "test-backend",
+      signkey: test_key_lookup("test-backend", :private),
+      signalg: "Ed25519",
+      keys: %{
+        kn => %{ "private" => test_key_lookup(kn, :private),
+                 "public" => test_key_lookup(kn, :public)
+               }
+      },
+      verification_keys: %{
+        "test-dealer" => %{ "crv" => "Ed25519",
+                            "kty" => "OKP",
+                            "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
+                          }
+      },
+      host: get_in(ctx, [:cfg, :registrar, :addr]),
+      port: get_in(ctx, [:cfg, :registrar, :port])
+    }
+  end
+
+  def assert_valid_sig(ctx, kn) do
+    reg = Remsign.Backend.register()
+    hm = Remsign.Backend.hmac()
+    d = << 0 :: 160 >>
+    rep = Remsign.Registrar.sign(kn, :sha, d)
+    case Poison.decode(rep) do
+      {:error, _} ->
+        {:ok, sig} =
+          Remsign.Utils.unwrap(rep,
+            fn _kn, :public -> JOSE.JWK.from_oct(hm) end,
+            ctx[:skew],
+            fn n -> Remsign.Utils.cc_store_nonce(ctx[:cc], n) end) |>
+          Base.decode16(case: :mixed)
+
+        {%{ kty: kty }, kk} = test_key_lookup(kn, :public) |> JOSE.JWK.from_map |> JOSE.JWK.to_key
+        v = case kty do
+              :jose_jwk_kty_rsa -> :public_key.verify({:digest, d}, :sha, sig, kk)
+              :jose_jwk_kty_dsa -> :public_key.verify({:digest, d}, :sha, sig, kk)
+              :jose_jwk_kty_ec -> :public_key.verify({:digest, d}, :sha, sig, kk)
+              :jose_jwk_kty_okp_ed25519 -> :jose_curve25519.ed25519_verify(sig, d, kk)
+            end
+        assert v == true
+      {:ok, { :error, err }} -> assert err == :expect_fail
+    end
+  end
+
   test "registrar backend signing with unknown key", ctx do
     {:ok, _be} = Remsign.Backend.start_link(
       %{
@@ -191,29 +255,19 @@ defmodule RemsignBackendTest do
     assert Remsign.Registrar.sign("bad-key", :sha, << 0 :: 160 >>) == {:error, :unknown_key}
   end
 
-  test "registrar backend signing", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(
-      %{
-        ident: "test-backend",
-        signkey: test_key_lookup("test-backend", :private),
-        signalg: "Ed25519",
-        keys: %{
-          "key2" => %{ "private" => test_key_lookup("key2", :private),
-                       "public" => test_key_lookup("key2", :public)
-                     }
-        },
-        verification_keys: %{
-          "test-dealer" => %{ "crv" => "Ed25519",
-                              "kty" => "OKP",
-                              "x" => "PgH0Bdgk0y6eVC7GrmJO2bnFick1nzSCcTPHAR4xcO0"
-                            }
-        },
-        host: get_in(ctx, [:cfg, :registrar, :addr]),
-        port: get_in(ctx, [:cfg, :registrar, :port])
-      }
-    )
-    reg = Remsign.Backend.register()
-
-    assert Remsign.Registrar.sign("key2", :sha, << 0 :: 160 >>) == :expect_fail
+  test "registrar backend signing (ECDSA)", ctx do
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx, "key2"))
+    assert_valid_sig(ctx, "key2")
   end
+
+  test "registrar backend signing (RSA)", ctx do
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx, "key1"))
+    assert_valid_sig(ctx, "key1")
+  end
+
+  test "registrar backend signing (Ed25519)", ctx do
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx, "key3"))
+    assert_valid_sig(ctx, "key3")
+  end
+
 end

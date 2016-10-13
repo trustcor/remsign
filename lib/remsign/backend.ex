@@ -35,7 +35,8 @@ defmodule Remsign.Backend do
       ident: "backend",
       skew: 60,
       keys: %{},
-      verification_keys: %{}
+      verification_keys: %{},
+      hmac: nil
     }
     GenServer.start_link __MODULE__, [ Map.merge(defaults, cfg) ], name: __MODULE__
   end
@@ -50,6 +51,10 @@ defmodule Remsign.Backend do
 
   def register() do
     GenServer.call __MODULE__, :register
+  end
+
+  def hmac() do
+    GenServer.call __MODULE__, :hmac
   end
 
   defp handle_register_response(%{ "command" => "register", "response" => resp = %{ "ciphertext" => _ } }, st) do
@@ -69,6 +74,10 @@ defmodule Remsign.Backend do
     {:reply, store_nonce(n), st}
   end
 
+  def handle_call(:hmac, _from, st) do
+    {:reply, st[:hmac], st}
+  end
+
   def handle_call(:register, _from, st) do
     import Supervisor.Spec, warn: false
 
@@ -81,24 +90,24 @@ defmodule Remsign.Backend do
            }
     m = Remsign.Utils.wrap(msg, st[:ident], st[:signalg], st[:signkey] )
     :chumak.send(st[:sock],m)
-    r = case :chumak.recv(st[:sock]) do
-          {:ok, rep} ->
-            rep = Remsign.Utils.unwrap(rep, fn k, :public -> get_in(st, [:verification_keys, k]) end, st[:skew], &store_nonce/1) |>
-              handle_register_response(st)
-            hm = Map.get(rep, "hmac_key")
-            {:ok, hm} = Base.decode16(hm, case: :mixed)
-            port = Map.get(rep, "port")
+    {r, hm} = case :chumak.recv(st[:sock]) do
+                {:ok, rep} ->
+                  rep = Remsign.Utils.unwrap(rep, fn k, :public -> get_in(st, [:verification_keys, k]) end, st[:skew], &store_nonce/1) |>
+                    handle_register_response(st)
+                  hm = Map.get(rep, "hmac_key")
+                  {:ok, hm} = Base.decode16(hm, case: :mixed)
+                  port = Map.get(rep, "port")
 
-            children = [
-              Honeydew.child_spec(:backend_pool, Remsign.BackendWorker, { st, port, hm }, workers: Map.get(st, :num_workers, 10))
-            ]
-            Supervisor.start_link(children, strategy: :one_for_one)
-            rep
-          e ->
-            log(:error, "Unexpected reply from register: #{inspect(e)}")
-            nil
-        end
-    {:reply, r, st}
+                  children = [
+                    Honeydew.child_spec(:backend_pool, Remsign.BackendWorker, { st, port, hm }, workers: Map.get(st, :num_workers, 10))
+                  ]
+                  Supervisor.start_link(children, strategy: :one_for_one)
+                  {rep, hm}
+                e ->
+                  log(:error, "Unexpected reply from register: #{inspect(e)}")
+                  {nil, nil}
+              end
+    {:reply, r, Map.put(st, :hmac, hm)}
   end
 
 end
@@ -127,15 +136,19 @@ defmodule Remsign.BackendWorker do
   defp alg_from_keymap(%{ "crv" => "P-256", "kty" => "EC" }), do: "ES256"
   defp alg_from_keymap(_), do: nil
 
+  defp do_sign(d, alg, %{kty: :jose_jwk_kty_rsa}, k), do: :public_key.sign({:digest, d}, alg, k)
+  defp do_sign(d, alg, %{kty: :jose_jwk_kty_ec}, k), do: :public_key.sign({:digest, d}, alg, k)
+  defp do_sign(d, alg, %{kty: :jose_jwk_kty_dsa}, k), do: :public_key.sign({:digest, d}, alg, k)
+  defp do_sign(d, alg, %{kty: :jose_jwk_kty_okp_ed25519}, k), do: :jose_curve25519.ed25519_sign(d, k)
+
   defp command_reply("sign", %{ "keyname" => kname, "hash_type" => htype, "digest" => digest }, st ) do
     case get_in(st, [:keys, kname, "private"]) do
       nil ->
         Poison.encode!(%{ error: :unknown_key })
       km ->
-        k = JOSE.JWK.from_map(km) |>
-          JOSE.JWS.sign(digest, %{ "alg" => alg_from_keymap(km) } ) |>
-          JOSE.JWS.compact |>
-          elem(1) |>
+        {kty, kk} = JOSE.JWK.from_map(km) |> JOSE.JWK.to_key
+        alg = String.to_atom(htype)
+        %{ payload: do_sign(digest, alg, kty, kk) |> Base.encode16(case: :lower) } |>
           Remsign.Utils.wrap("backend-key", "HS256", JOSE.JWK.from_oct(st[:hmac]))
     end
   end
