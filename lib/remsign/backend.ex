@@ -133,23 +133,25 @@ defmodule Remsign.BackendWorker do
     {:ok, st}
   end
 
-  defp alg_from_keymap(%{ "crv" => "P-256", "kty" => "EC" }), do: "ES256"
-  defp alg_from_keymap(_), do: nil
-
   defp do_sign(d, alg, %{kty: :jose_jwk_kty_rsa}, k), do: :public_key.sign({:digest, d}, alg, k)
   defp do_sign(d, alg, %{kty: :jose_jwk_kty_ec}, k), do: :public_key.sign({:digest, d}, alg, k)
   defp do_sign(d, alg, %{kty: :jose_jwk_kty_dsa}, k), do: :public_key.sign({:digest, d}, alg, k)
-  defp do_sign(d, alg, %{kty: :jose_jwk_kty_okp_ed25519}, k), do: :jose_curve25519.ed25519_sign(d, k)
+  defp do_sign(d, _alg, %{kty: :jose_jwk_kty_okp_ed25519}, k), do: :jose_curve25519.ed25519_sign(d, k)
 
   defp command_reply("sign", %{ "keyname" => kname, "hash_type" => htype, "digest" => digest }, st ) do
-    case get_in(st, [:keys, kname, "private"]) do
+    case Remsign.Utils.known_hash(htype) do
       nil ->
-        Poison.encode!(%{ error: :unknown_key })
-      km ->
-        {kty, kk} = JOSE.JWK.from_map(km) |> JOSE.JWK.to_key
-        alg = String.to_atom(htype)
-        %{ payload: do_sign(digest, alg, kty, kk) |> Base.encode16(case: :lower) } |>
-          Remsign.Utils.wrap("backend-key", "HS256", JOSE.JWK.from_oct(st[:hmac]))
+        Poison.encode!(%{ error: :unknown_digest_type })
+      alg when is_atom(alg) ->
+        case get_in(st, [:keys, kname, "private"]) do
+          nil ->
+            Poison.encode!(%{ error: :unknown_key })
+          km ->
+            {kty, kk} = JOSE.JWK.from_map(km) |> JOSE.JWK.to_key
+            {:ok, d} = Base.decode16(digest, case: :lower)
+            %{ payload: do_sign(d, alg, kty, kk) |> Base.encode16(case: :lower) } |>
+              Remsign.Utils.wrap("backend-key", "HS256", JOSE.JWK.from_oct(st[:hmac]))
+        end
     end
   end
 

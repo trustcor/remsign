@@ -14,14 +14,18 @@ defmodule Remsign.Utils do
     case Timex.parse(t, "{ISO:Extended:Z}") do
       {:ok, ts} ->
         d = Timex.diff(DateTime.utc_now, ts, :seconds)
-        abs(d) < skew
+        r = (abs(d) < skew)
+        log(:debug, "Result of time validation = #{inspect(r)}")
+        r
       {:error, e} ->
         log(:error, "Timestamp format for #{inspect(t)} invalid: #{inspect(e)}")
         false
     end
   end
 
-  def unwrap(m, kl, skew, nstore) do
+  def keyname(m), do: Joken.token(m) |> Joken.peek |> Map.get("sub")
+
+  defp unwrap_h(m, kl, skew, nstore) do
     jp = Joken.token(m) |> Joken.peek
     alg = case JOSE.JWS.peek_protected(m) |> Poison.decode do
             {:ok, %{ "alg" => algo }} -> algo
@@ -40,6 +44,13 @@ defmodule Remsign.Utils do
       Joken.verify
     log(:debug, "Verify result = #{inspect(v)}")
     v.claims["payload"]
+  end
+
+  def unwrap(m, kl, skew, nstore) do
+    case Poison.decode(m) do
+      {:error, _} -> unwrap_h(m, kl, skew, nstore)
+      {:ok, d} -> d
+    end
   end
 
   def wrap(m, keyid, alg, sig, opts \\ []) do
@@ -72,11 +83,15 @@ defmodule Remsign.Utils do
   def cc_store_nonce(cc, n, ttl \\ 60) when is_binary(n) do
     case valid_nonce?(n) do
       true ->
-        case ConCache.insert_new(cc, n, true) do
-          :ok -> true
-          {:error, :already_exists} -> false
-        end
+        log(:debug, "Storing nonce #{inspect(n)} in #{inspect(cc)}")
+        r = case ConCache.insert_new(cc, n, %ConCache.Item{value: true, ttl: ttl}) do
+              :ok -> true
+              {:error, :already_exists} -> false
+            end
+        log(:debug, "Store nonce = #{inspect(r)}")
+        r
       false ->
+        log(:warn, "Invalid nonce format")
         false # invalid nonce format
     end
   end
@@ -92,5 +107,23 @@ defmodule Remsign.Utils do
     priv = :public_key.pem_decode(priv) |> List.first |> :public_key.pem_entry_decode(:RSAPrivateKey) |> JOSE.JWK.from_key |> JOSE.JWK.to_map
     pub = JOSE.JWK.to_public(priv) |> JOSE.JWK.to_map
     {elem(pub,1), elem(priv, 1)}
+  end
+
+  defp known_hash_h("sha"), do: :sha
+  defp known_hash_h("sha1"), do: :sha
+  defp known_hash_h("sha224"), do: :sha224
+  defp known_hash_h("sha256"), do: :sha256
+  defp known_hash_h("sha384"), do: :sha384
+  defp known_hash_h("sha512"), do: :sha512
+  defp known_hash_h("md5"), do: :md5
+  defp known_hash_h("md4"), do: :md4
+  defp known_hash_h("md2"), do: :md2
+  defp known_hash_h(_), do: nil
+
+  @doc """
+  Return an atom corresponding to a hash type, or nil if the hash is unknown
+  """
+  def known_hash(h) when is_binary(h) do
+    String.replace(h, ~r/[^A-Za-z0-9]/, "") |> String.downcase |> known_hash_h
   end
 end

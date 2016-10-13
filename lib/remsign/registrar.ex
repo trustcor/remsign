@@ -123,7 +123,10 @@ defmodule Remsign.Registrar do
   end
 
   def sign(kid, htype, digest) do
-    GenServer.call __MODULE__, {:sign, kid, htype, digest}
+    case Remsign.Utils.known_hash(to_string(htype)) do
+      nil -> {:error, :unknown_digest_type}
+      _ -> GenServer.call __MODULE__, {:sign, kid, htype, digest}
+    end
   end
 
   def handle_message(st, m) do
@@ -188,7 +191,7 @@ defmodule Remsign.Registrar do
               :ok = :chumak.send_multipart(dsock, ["", msg])
               case :chumak.recv_multipart(dsock) do
                 {:ok, ["", r] } ->
-                  r
+                  {hmk, r}
                 e ->
                   log(:error, "Unexpected reply from backend: #{inspect(e)}")
                   {:error, :unexpected_reply}
