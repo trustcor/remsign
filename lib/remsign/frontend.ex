@@ -9,6 +9,45 @@ defmodule Remsign.Frontend do
 
   use GenServer
 
+  def init([cfg]) do
+    keys = Remsign.Keylookup.find_control_files(get_in(cfg, [:keys, :directory]), fn x -> Remsign.Keylookup.read_yaml_file(x) end )
+
+    children = [
+      Honeydew.child_spec(:frontend_pool, FrontendPool, {get_in_default(cfg, [:frontend, :brokers], []),
+                                                         keys,
+                                                         get_in_default(cfg, [:frontend, :keyid], "remsign-client-key"),
+                                                         get_in_default(cfg, [:frontend, :skew], 30)
+                                                        })]
+
+
+    {:ok, %{ super: Supervisor.start_link(children, strategy: :one_for_one) } }
+  end
+
+  def start_link(cfg) do
+    GenServer.start_link __MODULE__, [cfg], name: __MODULE__
+  end
+
+  defp sign_h(_, nil, _), do: {:error, :unknown_digest_type}
+  defp sign_h(keyid, htype, digest) when is_binary(keyid) and is_atom(htype) and is_binary(digest) do
+    FrontendPool.call(:frontend_pool, {:sign, [keyid, htype, digest]})
+  end
+
+  defp sign_m(keyid, htype, message) do
+    d = :crypto.hash(htype, message) |> Base.encode16(case: :lower)
+    sign_h(keyid, htype, d)
+  end
+
+  def dsign(keyid, hash_type, digest), do:  sign_h(keyid, Remsign.Utils.known_hash(hash_type), digest)
+  def sign(keyid, hash_type, message), do: sign_m(keyid, Remsign.Utils.known_hash(hash_type), message)
+
+  def dsign_async(keyid, hash_type, digest), do:  Task.async(fn -> sign_h(keyid, Remsign.Utils.known_hash(hash_type), digest) end)
+  def sign_async(keyid, hash_type, message), do: Task.async(fn -> sign_m(keyid, Remsign.Utils.known_hash(hash_type), message) end)
+end
+
+defmodule FrontendPool do
+  import Logger, only: [log: 2]
+  use Honeydew
+
   defp make_sock(ident, h, p) when is_binary(ident) and is_binary(h) and is_integer(p) do
     case :chumak.socket(:req, String.to_charlist(ident)) do
       {:ok, sock} -> case :chumak.connect(sock, :tcp, String.to_charlist(h), p) do
@@ -23,37 +62,31 @@ defmodule Remsign.Frontend do
     end
   end
 
-  def init([cfg]) do
-    socks = Enum.map(get_in_default(cfg, [:frontend, :brokers], []),
+  defp hrand do
+    :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+  end
+
+  def init({brokers, keys, kid, skew}) do
+    socks = Enum.map(brokers,
       fn c = %{ "host" => h, "port" => p } ->
-        log(:debug, "Make sock #{inspect(c)}"); make_sock(Map.get(c, "ident", "remsign-client"), h, p) end) |>
+        log(:debug, "Make sock #{inspect(c)}"); make_sock(Map.get(c, "ident", "remsign-client") <> "." <> hrand, h, p) end) |>
       Enum.reject(fn x -> x == nil end) |>
       Enum.into(%{})
-    keys = Remsign.Keylookup.find_control_files( get_in(cfg, [:keys, :directory]),
-      fn x -> Remsign.Keylookup.read_yaml_file(x) end )
-    log(:debug, "Socks = #{inspect(socks)}")
-    {:ok, %{ socks: socks,
-             keys: keys,
-             keyid: get_in_default(cfg, [:frontend, :keyid], "remsign-client-key"),
-             skew: get_in_default(cfg, [:frontend, :skew], 30) }}
+    {:ok, %{ socks: socks, keys: keys, skew: skew, keyid: kid }}
   end
 
-  def start_link(cfg) do
-    GenServer.start_link __MODULE__, [cfg], name: __MODULE__
+  def sign(keyid, htype, digest, st) do
+    s = Map.get(st, :socks, %{}) |> Map.keys |> Enum.shuffle
+    sock = st[:socks][List.first(s)]
+    kf = fn kn, _public ->
+      case find_key(st[:keys], kn) do
+        nil -> nil
+        k -> Map.get(k, "public")
+      end
+    end
+    find_key(st[:keys], st[:keyid]) |>
+      handle_sign(st[:keyid], kf, keyid, htype, digest, st[:skew], sock)
   end
-
-  defp sign_h(_, nil, _), do: {:error, :unknown_digest_type}
-  defp sign_h(keyid, htype, digest) when is_binary(keyid) and is_atom(htype) and is_binary(digest) do
-    GenServer.call(__MODULE__, {:sign, keyid, htype, digest})
-  end
-
-  defp sign_m(keyid, htype, message) do
-    d = :crypto.hash(htype, message) |> Base.encode16(case: :lower)
-    sign_h(keyid, htype, d)
-  end
-
-  def dsign(keyid, hash_type, digest), do:  sign_h(keyid, Remsign.Utils.known_hash(hash_type), digest)
-  def sign(keyid, hash_type, message), do: sign_m(keyid, Remsign.Utils.known_hash(hash_type), message)
 
   defp find_key(keys, keyid) do
     Enum.find(keys, fn %{ "name" => n } -> keyid == n end)
@@ -86,20 +119,4 @@ defmodule Remsign.Frontend do
         {:error, :no_backend_available}
     end
   end
-
-  def handle_call({:sign, keyid, htype, digest}, _from, st) do
-    s = Map.get(st, :socks, %{}) |> Map.keys |> Enum.shuffle
-    sock = st[:socks][List.first(s)]
-    kf = fn kn, _public ->
-      case find_key(st[:keys], kn) do
-        nil -> nil
-        k -> Map.get(k, "public")
-      end
-    end
-    rep = find_key(st[:keys], st[:keyid]) |>
-      handle_sign(st[:keyid], kf, keyid, htype, digest, st[:skew], sock)
-
-    {:reply, rep, st}
-  end
-
 end

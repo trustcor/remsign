@@ -26,8 +26,8 @@ defmodule Remsign do
   end
 
   defp list_keys(keys) do
-    Enum.map(keys, fn k = %{ "name" => n } -> {n, Map.get(k, "public")} end) |>
-      Enum.reject(fn {_n, k} -> k == nil end) |>
+    Enum.map(keys, fn k = %{ "name" => n, "private" => _pk } -> {n, Map.get(k, "public")} end) |>
+      Enum.reject(fn {_n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
       Enum.into(%{})
   end
 

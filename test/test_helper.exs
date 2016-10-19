@@ -106,7 +106,9 @@ defmodule TestUtils do
 
   def test_public_keys() do
     kns = [ "fe-key", "test-backend", "test-dealer", "key1", "key2", "key3" ]
-    Enum.map(kns, fn kn -> { kn, test_key_lookup(kn, :public) } end) |> Enum.into(%{})
+    Enum.map(kns, fn kn -> { kn, test_key_lookup(kn, :public) } end) |>
+      Enum.reject(fn {n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
+      Enum.into(%{})
   end
 end
 

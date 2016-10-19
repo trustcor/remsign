@@ -18,12 +18,13 @@ defmodule Remsign.Mixfile do
     [applications: [:logger, :chumak, :poison, :timex,
                     :briefly, :yamerl, :yaml_elixir, :con_cache,
                     :edeliver, :exactor, :joken, :jose,
-                    :libdecaf, :libsodium ]
+                    :libdecaf, :libsodium, :honeydew ]
     ]
   end
 
   defp deps do
     [
+      {:honeydew, "~> 0.0.11"},
       {:edeliver, "~> 1.4.0"},
       {:distillery, "~> 0.10.1"},
       {:chumak, "~> 1.1"},

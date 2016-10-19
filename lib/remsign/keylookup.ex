@@ -135,7 +135,6 @@ defmodule Remsign.Keylookup do
              case Base.url_decode64(s, padding: false) do
                {:ok, b} ->
                  {_, t} = JOSE.JWK.from_oct(b) |> JOSE.JWK.to_map
-                 log(:info, "Private symmetric key = #{inspect(t)}")
                  t
                :error ->
                  log(:error, "Invalid URLsafe base64 for oct field")
