@@ -7,7 +7,6 @@ defmodule Remsign.Mixfile do
      elixir: "~> 1.3",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
-     escript: [main_module: Remsign],
      elixirc_paths: elixirc_paths(Mix.env),
      deps: deps()]
   end
@@ -16,14 +15,19 @@ defmodule Remsign.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :honeydew, :chumak, :poison, :timex,
-                    :briefly, :yamerl, :yaml_elixir, :con_cache
-                   ]]
+    [applications: [:logger, :chumak, :poison, :timex,
+                    :briefly, :yamerl, :yaml_elixir, :con_cache,
+                    :edeliver
+                   ],
+     included_applications: [:exactor, :joken, :jose,
+                             :libdecaf, :libsodium ]
+    ]
   end
 
   defp deps do
     [
-      {:honeydew, "~> 0.0.11"},
+      {:edeliver, "~> 1.4.0"},
+      {:distillery, "~> 0.10.1"},
       {:chumak, "~> 1.1"},
       {:jose, "~> 1.8.0"},
       {:libsodium, "~> 0.0.8"},

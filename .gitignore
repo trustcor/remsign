@@ -19,3 +19,7 @@ erl_crash.dump
 /deps
 erl_crash.dump
 *.ez
+.deliver-*/
+.deliver/releases
+rel/remsign
+
