@@ -76,7 +76,7 @@ defmodule Remsign.Backend do
   defp do_register_h(msg, sigkey, st) do
     import Supervisor.Spec, warn: false
 
-    log(:debug, "do_register_h: msg = #{inspect(msg)}")
+    log(:debug, "do_register_h: msg = #{inspect(msg)}, signature alg = #{st[:signalg]}")
     m = Remsign.Utils.wrap(msg, st[:signkey], st[:signalg], sigkey )
     log(:debug, "register message = #{inspect(m)}")
     :chumak.send(st[:sock],m)

@@ -61,12 +61,14 @@ defmodule Remsign.Utils do
   def wrap(m, keyid, alg, sig, opts \\ []) do
     ts = Keyword.get(opts, :ts, DateTime.utc_now)
     nonce = Keyword.get(opts, :nonce, Remsign.Utils.make_nonce)
+    signer = %Joken.Signer{jws: %{ "alg" => alg }, jwk: sig}
+    log(:debug, "Message signer: #{inspect(signer)}")
     m |>
       Joken.token |>
       Joken.with_sub(keyid) |>
       Joken.with_iat(ts) |>
       Joken.with_jti(nonce) |>
-      Joken.with_signer(%Joken.Signer{jws: %{ "alg" => alg }, jwk: sig} ) |>
+      Joken.with_signer(signer) |>
       Joken.sign |>
       Joken.get_compact
   end
