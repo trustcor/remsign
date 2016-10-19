@@ -17,10 +17,8 @@ defmodule Remsign.Mixfile do
   def application do
     [applications: [:logger, :chumak, :poison, :timex,
                     :briefly, :yamerl, :yaml_elixir, :con_cache,
-                    :edeliver
-                   ],
-     included_applications: [:exactor, :joken, :jose,
-                             :libdecaf, :libsodium ]
+                    :edeliver, :exactor, :joken, :jose,
+                    :libdecaf, :libsodium ]
     ]
   end
 
