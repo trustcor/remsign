@@ -157,6 +157,26 @@ defmodule Remsign.Registrar do
     end
   end
 
+  def send_sign_message({_dport, dsock, hm}, kname, htype, digest) do
+    hmk = JOSE.JWK.from_oct(hm)
+    msg = %{ payload: %{ command: :sign,
+                         parms: %{ keyname: kname,
+                                   hash_type: htype,
+                                   digest: digest } } } |>
+      Remsign.Utils.wrap("backend-hmac", "HS256", hmk)
+    case :chumak.send_multipart(dsock, ["", msg]) do
+      :ok ->
+        case :chumak.recv_multipart(dsock) do
+          {:ok, ["", r] } ->
+            {hmk, r}
+          e ->
+            log(:error, "Unexpected reply from backend: #{inspect(e)}")
+            {nil, {:error, :unexpected_reply}}
+        end
+      {:error, :no_connected_peers} -> {nil, {:error, :no_valid_backend}}
+    end
+  end
+
   def handle_cast({:message, "ping"}, st) do
     :chumak.send(st[:sock], "pong")
     {:noreply, st}
@@ -178,24 +198,11 @@ defmodule Remsign.Registrar do
     rep = case get_in(st, [:k2d, kname]) do
             nil ->
               log(:warn, "Unknown key #{kname} given")
-              {:error, :unknown_key}
+              {nil, {:error, :unknown_key}}
             bl when is_list(bl) ->
-              [{_dport, dsock, hm}] = Enum.take_random(bl, 1)
-              hmk = JOSE.JWK.from_oct(hm)
-              log(:info, "HMAC key = #{inspect(hmk)}")
-              msg = %{ payload: %{ command: :sign,
-                                   parms: %{ keyname: kname,
-                                             hash_type: htype,
-                                             digest: digest } } } |>
-                Remsign.Utils.wrap("backend-hmac", "HS256", hmk)
-              :ok = :chumak.send_multipart(dsock, ["", msg])
-              case :chumak.recv_multipart(dsock) do
-                {:ok, ["", r] } ->
-                  {hmk, r}
-                e ->
-                  log(:error, "Unexpected reply from backend: #{inspect(e)}")
-                  {:error, :unexpected_reply}
-              end
+              Enum.shuffle(bl) |>
+                Enum.reduce_while({:error, :no_valid_backend},
+                  fn t, err -> v = send_sign_message(t, kname, htype, digest); if v == err, do: {:cont, err}, else: {:halt, v} end)
           end
     {:reply, rep, st}
   end

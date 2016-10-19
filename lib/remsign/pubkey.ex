@@ -12,6 +12,10 @@ defmodule Remsign.Pubkey do
       Base.encode16(case: :lower)
   end
 
+  def keyid(%{ "kty" => "oct", "k" => key }) when is_binary(key) do
+    :crypto.hash(:sha, "oct" <> key) |> Base.encode16(case: :lower)
+  end
+
   def keyid(%{ "kty" => "OKP", "crv" => "Ed25519", "x" => pubkey }) when is_binary(pubkey) do
     :crypto.hash(:sha, "ed25519" <> pubkey) |>
       Base.encode16(case: :lower)
@@ -91,6 +95,9 @@ defmodule Remsign.Pubkey do
         {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, algid, parms}, spbits} =
           :public_key.der_decode(:SubjectPublicKeyInfo, spki)
         get_public_key_from_bits(algid, spbits, parms) |> joken_key
+      [{:RSAPublicKey, bits, _}] ->
+        pk = {:RSAPublicKey, n, e} = :public_key.der_decode(:RSAPublicKey, bits)
+        joken_key({pk, nil})
       [] ->
         # try openssh pubkey format
         [kt, pkdata | _rest] = String.split(keydata, " ") |> Enum.map(&String.trim/1)

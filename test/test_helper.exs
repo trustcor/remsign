@@ -99,7 +99,15 @@ defmodule TestUtils do
     }
   end
 
+  def test_key_lookup(n, "private"), do: test_key_lookup(n, :private)
+  def test_key_lookup(n, "public"), do: test_key_lookup(n, :public)
+
   def test_key_lookup(_, _), do: nil
+
+  def test_public_keys() do
+    kns = [ "fe-key", "test-backend", "test-dealer", "key1", "key2", "key3" ]
+    Enum.map(kns, fn kn -> { kn, test_key_lookup(kn, :public) } end) |> Enum.into(%{})
+  end
 end
 
 

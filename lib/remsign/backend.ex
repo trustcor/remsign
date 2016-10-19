@@ -6,8 +6,10 @@ defmodule Remsign.Backend do
   use GenServer
   import Logger, only: [log: 2]
 
-  def init([cfg = %{}]) do
-    sock = case :chumak.socket(:req, String.to_charlist(Map.get(cfg, :ident))) do
+  def init([cfg = %{}, klf, pkf]) do
+    sockname = to_string(cfg[:ident]) <> "." <> cfg[:host] <> "." <> to_string(cfg[:port])
+    log(:debug, "Starting backend: #{sockname}")
+    sock = case :chumak.socket(:req, String.to_charlist(sockname)) do
              {:error, {:already_started, sockpid}} -> sockpid
              {:ok, sockpid} -> sockpid
              e ->
@@ -19,38 +21,34 @@ defmodule Remsign.Backend do
     :chumak.send(sock, "ping")
     case :chumak.recv(sock) do
       {:ok, "pong"} ->
-        {:ok, Map.put(cfg, :sock, sock) |> Map.put(:ekpriv, priv) |> Map.put(:ekpub, pub)}
+        nst = Map.merge(cfg, %{
+                sock: sock,
+                ekpriv: priv,
+                ekpub: pub,
+                klf: klf,
+                pkf: pkf })
+        {_r, hm} = do_register(nst)
+        {:ok, Map.put(nst, :hmac, hm)}
       e ->
         log(:error, "Non pong error from registrar: #{inspect(e)}")
         {:error, :no_registry_connect}
     end
   end
 
-  def start_link(cfg = %{}) do
+  def start_link(cfg = %{}, klf, pkf) do
     defaults = %{
-      num_workers: 1,
+      num_workers: 5,
       sock: nil,
       host: "127.0.0.1",
       port: 25000,
       ident: "backend",
-      skew: 60,
-      keys: %{},
-      verification_keys: %{},
-      hmac: nil
+      skew: 60
     }
-    GenServer.start_link __MODULE__, [ Map.merge(defaults, cfg) ], name: __MODULE__
+    GenServer.start_link __MODULE__, [ Map.merge(defaults, Remsign.Config.atomify(cfg)), klf, pkf ], name: __MODULE__
   end
 
   defp store_nonce(_n) do
     true
-  end
-
-  defp get_public_keys(ks) do
-    Enum.map(ks, fn {kn, k} -> {kn, Map.get(k, "public")} end) |> Enum.into(%{})
-  end
-
-  def register() do
-    GenServer.call __MODULE__, :register
   end
 
   def hmac() do
@@ -70,6 +68,49 @@ defmodule Remsign.Backend do
     { :error, :malformed_response }
   end
 
+  defp do_register_h(_, nil, st) do
+    log(:error, "Unable to load private signature key: #{st[:signkey]}")
+    {nil, nil}
+  end
+
+  defp do_register_h(msg, sigkey, st) do
+    import Supervisor.Spec, warn: false
+
+    log(:debug, "do_register_h: msg = #{inspect(msg)}")
+    m = Remsign.Utils.wrap(msg, st[:signkey], st[:signalg], sigkey )
+    log(:debug, "register message = #{inspect(m)}")
+    :chumak.send(st[:sock],m)
+    case :chumak.recv(st[:sock]) do
+      {:ok, rep} ->
+        rep = Remsign.Utils.unwrap(rep, fn k, _kt -> st[:klf].(k, :public) end, st[:skew], &store_nonce/1) |>
+          handle_register_response(st)
+        hm = Map.get(rep, "hmac_key")
+        {:ok, hm} = Base.decode16(hm, case: :mixed)
+        port = Map.get(rep, "port")
+
+        children = Enum.map(1..st[:num_workers],
+          fn n ->
+            Supervisor.Spec.worker(Remsign.BackendWorker, [{st, port, hm, n}], id: String.to_atom("Remsign.BackendWorker.#{n}"))
+          end)
+        Supervisor.start_link(children, strategy: :one_for_one)
+        {rep, hm}
+      e ->
+        log(:error, "Unexpected reply from register: #{inspect(e)}")
+        {nil, nil}
+    end
+  end
+
+  def do_register(st) do
+    msg = %{ command: "register",
+             params: %{
+               pubkeys: st[:pkf].(),
+               ekey: st[:ekpub]
+             }
+           }
+    sigkey = st[:klf].(st[:signkey], :private)
+    do_register_h(msg, sigkey, st)
+  end
+
   def handle_call({:store_nonce, n}, _from, st) do
     {:reply, store_nonce(n), st}
   end
@@ -78,45 +119,14 @@ defmodule Remsign.Backend do
     {:reply, st[:hmac], st}
   end
 
-  def handle_call(:register, _from, st) do
-    import Supervisor.Spec, warn: false
-
-    pk = get_public_keys(st[:keys])
-    msg = %{ command: "register",
-             params: %{
-               pubkeys: pk,
-               ekey: st[:ekpub]
-             }
-           }
-    m = Remsign.Utils.wrap(msg, st[:ident], st[:signalg], st[:signkey] )
-    :chumak.send(st[:sock],m)
-    {r, hm} = case :chumak.recv(st[:sock]) do
-                {:ok, rep} ->
-                  rep = Remsign.Utils.unwrap(rep, fn k, :public -> get_in(st, [:verification_keys, k]) end, st[:skew], &store_nonce/1) |>
-                    handle_register_response(st)
-                  hm = Map.get(rep, "hmac_key")
-                  {:ok, hm} = Base.decode16(hm, case: :mixed)
-                  port = Map.get(rep, "port")
-
-                  children = [
-                    Honeydew.child_spec(:backend_pool, Remsign.BackendWorker, { st, port, hm }, workers: Map.get(st, :num_workers, 10))
-                  ]
-                  Supervisor.start_link(children, strategy: :one_for_one)
-                  {rep, hm}
-                e ->
-                  log(:error, "Unexpected reply from register: #{inspect(e)}")
-                  {nil, nil}
-              end
-    {:reply, r, Map.put(st, :hmac, hm)}
-  end
-
 end
 
 defmodule Remsign.BackendWorker do
-  use Honeydew
+  use GenServer
+
   import Logger, only: [log: 2]
 
-  def init({st, port, hm}) do
+  def init({st, port, hm, n}) do
     wid = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
     sock = case :chumak.socket(:rep, String.to_charlist(wid)) do
              {:error, {:already_started, sockpid}} -> sockpid
@@ -127,10 +137,15 @@ defmodule Remsign.BackendWorker do
            end
     {:ok, _pid} = :chumak.connect(sock, :tcp, String.to_charlist(st[:host]), port)
     :timer.sleep(5)
-    log(:info, "Starting backend worker #{inspect(wid)} on #{inspect(st[:host])}:#{inspect(port)}: HMAC = #{inspect(hm)}")
+    log(:info, "Starting backend worker #{inspect(n)} on #{inspect(st[:host])}:#{inspect(port)}: HMAC = #{inspect(hm)}")
     st = Map.merge(st, %{ id: wid, sock: sock, hmac: hm})
-    _pid = spawn_link(fn -> listener(sock, st) end)
+    me = self
+    _pid = spawn_link(fn -> listener(sock, me, st) end)
     {:ok, st}
+  end
+
+  def start_link({st, port, hm, n}) do
+    GenServer.start_link __MODULE__, {st, port, hm, n}, name: String.to_atom("Remsign.BackendWorker.#{n}")
   end
 
   defp do_sign(d, alg, %{kty: :jose_jwk_kty_rsa}, k), do: :public_key.sign({:digest, d}, alg, k)
@@ -143,14 +158,19 @@ defmodule Remsign.BackendWorker do
       nil ->
         Poison.encode!(%{ error: :unknown_digest_type })
       alg when is_atom(alg) ->
-        case get_in(st, [:keys, kname, "private"]) do
+        case st[:klf].(kname, :private) do
           nil ->
             Poison.encode!(%{ error: :unknown_key })
           km ->
-            {kty, kk} = JOSE.JWK.from_map(km) |> JOSE.JWK.to_key
-            {:ok, d} = Base.decode16(digest, case: :lower)
-            %{ payload: do_sign(d, alg, kty, kk) |> Base.encode16(case: :lower) } |>
-              Remsign.Utils.wrap("backend-key", "HS256", JOSE.JWK.from_oct(st[:hmac]))
+            log(:debug, "Decoding digest: #{inspect(digest)}")
+            case Base.decode16(digest, case: :lower) do
+              {:ok, d} ->
+                {kty, kk} = JOSE.JWK.from_map(km) |> JOSE.JWK.to_key
+                %{ payload: do_sign(d, alg, kty, kk) |> Base.encode16(case: :lower) } |>
+                  Remsign.Utils.wrap("backend-key", "HS256", JOSE.JWK.from_oct(st[:hmac]))
+              :error ->
+                Poison.encode!(%{error: :malformed_digest})
+            end
         end
     end
   end
@@ -168,18 +188,22 @@ defmodule Remsign.BackendWorker do
     command_reply(Map.get(msg, "command"), Map.get(msg, "parms"), st)
   end
 
-  def listener(sock, st) do
+  defp listener(sock, parent, st) do
     case :chumak.recv(sock) do
       {:ok, "ping"} ->
         log(:info, "Ping message received on #{st[:id]}")
-        :chumak.send(sock, "pong")
+        send parent, {:reply, "pong"}
       {:ok, m} ->
-        rep = handle_message(m, st)
-        :chumak.send(sock, rep)
+        send parent, {:reply, handle_message(m, st)}
       e ->
         log(:info, "Unknown message received on #{st[:id]}: #{inspect(e)}")
-        :chumak.send(sock, Poison.encode(%{ error: :unknown_command }))
+        send parent, {:reply, Poison.encode(%{ error: :unknown_command })}
     end
-    listener(sock, st)
+    listener(sock, parent, st)
+  end
+
+  def handle_info({:reply, msg}, st) do
+    :chumak.send(st[:sock], msg)
+    {:noreply, st}
   end
 end

@@ -76,6 +76,12 @@ defmodule RemsignLookupTest do
            - Ed25519
          private: osshpriv.pem
          public: ossh.pub
+         """ },
+      { "d3/d2/hmac.yml", """
+         name: Key 4
+         algs:
+           - HS256
+         oct: 488vgbyX9wFaDLoZvx4ePfSYU3bYaoCeTxl-_nOYNX8
          """ }
     ]
     Enum.each(content, fn {fname, c} -> File.write!(Path.join(td, fname), c) end)
@@ -162,6 +168,18 @@ defmodule RemsignLookupTest do
             "crv" => "Ed25519",
             "kty" => "OKP",
             "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE"
+          }
+        },
+        %{
+          "name" => "Key 4",
+          "algs" => ["HS256"],
+          "private" =>  %{
+               "k" => "488vgbyX9wFaDLoZvx4ePfSYU3bYaoCeTxl-_nOYNX8",
+               "kty" => "oct"
+          },
+          "public" =>  %{
+               "k" => "488vgbyX9wFaDLoZvx4ePfSYU3bYaoCeTxl-_nOYNX8",
+               "kty" => "oct"
           }
         }
       ]

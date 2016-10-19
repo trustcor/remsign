@@ -1,0 +1,7 @@
+name: key1
+algs:
+  - RS256
+  - RS384
+  - RS512
+private: key1.priv.pem
+public: key1.pub.pem

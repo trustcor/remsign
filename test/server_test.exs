@@ -11,6 +11,12 @@ defmodule RemsignServerTest do
         alg: "Ed25519"
       }
     }
+
+    Enum.each([:chumak], fn a -> Application.ensure_all_started(a) end)
+    on_exit fn ->
+      Enum.each([:chumak], fn a -> Application.stop(a) end)
+    end
+
     {:ok, a} = Agent.start_link(fn -> MapSet.new() end)
     [cfg: cfg, nag: a]
   end
@@ -97,10 +103,11 @@ defmodule RemsignServerTest do
     end
   end
 
+  def health, do: Poison.encode!(%{ command: :health })
+
   test "send json (but not JWT) message", ctx do
     sock = connect(ctx)
-    msg = Poison.encode!(%{ command: :health })
-    assert :chumak.send(sock, msg) == :ok
+    assert :chumak.send(sock, health) == :ok
     case :chumak.recv(sock) do
       e ->
         assert e == {:ok, Poison.encode!(%{ error: :invalid_jwt })}
@@ -108,8 +115,8 @@ defmodule RemsignServerTest do
   end
 
   test "build JWT message" do
-    s = Joken.Signer.hs("HS256", "secret")
-    assert Remsign.Utils.wrap(%{ payload: "message" }, "my-key", s,
+    s = JOSE.JWK.from_oct("secret")
+    assert Remsign.Utils.wrap(%{ payload: "message" }, "my-key", "HS256", s,
       ts: Timex.parse!("2010-12-01T13:14:15Z", "{ISO:Extended:Z}"),
       nonce: << 1::64 >>) == String.replace("""
       eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.
@@ -123,7 +130,7 @@ defmodule RemsignServerTest do
   test "send JWT message", ctx do
     sock = connect(ctx)
     k = Joken.Signer.hs("HS256", "secret")
-    msg = %{ payload: %{ command: :health} } |>
+    msg = %{ command: :health} |>
       Joken.token |>
       Joken.with_sub("secret-key") |>
       Joken.with_iat(DateTime.utc_now) |>
@@ -166,7 +173,7 @@ defmodule RemsignServerTest do
         "kty" => "OKP",
         "x" => "oGnaw4dQKKYuKNFs8rYfhmVkw6_FKjXk4o7kmBHq2sE"
       })
-    msg = %{ payload: %{ command: :health} } |>
+    msg = %{ command: :health} |>
       Joken.token |>
       Joken.with_sub("secret-ed") |>
       Joken.with_iat(DateTime.utc_now) |>
@@ -196,7 +203,7 @@ defmodule RemsignServerTest do
         "x" => "80fv3sOdpkeQJ61ysp6FUe5NcNa9jWPlJ_eC6kd0mpA",
         "y" => "XhRKUz4GU4xdRXucOGr4S1oCC3RQXp7II6ARklBBFgs"
       })
-    msg = %{ payload: %{ command: :health} } |>
+    msg = %{ command: :health} |>
       Joken.token |>
       Joken.with_sub("secret-ecdsa") |>
       Joken.with_iat(DateTime.utc_now) |>
@@ -244,7 +251,7 @@ defmodule RemsignServerTest do
   test "send duplicate JWT message", ctx do
     sock = connect(ctx)
     k = Joken.Signer.hs("HS256", "secret")
-    msg = %{ payload: %{ command: :health} } |>
+    msg = %{ command: :health}  |>
       Joken.token |>
       Joken.with_sub("secret-key") |>
       Joken.with_iat(DateTime.utc_now) |>

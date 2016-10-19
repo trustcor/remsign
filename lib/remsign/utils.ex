@@ -14,16 +14,21 @@ defmodule Remsign.Utils do
     case Timex.parse(t, "{ISO:Extended:Z}") do
       {:ok, ts} ->
         d = Timex.diff(DateTime.utc_now, ts, :seconds)
-        r = (abs(d) < skew)
-        log(:debug, "Result of time validation = #{inspect(r)}")
-        r
+        (abs(d) < skew)
       {:error, e} ->
         log(:error, "Timestamp format for #{inspect(t)} invalid: #{inspect(e)}")
         false
     end
   end
 
-  def keyname(m), do: Joken.token(m) |> Joken.peek |> Map.get("sub")
+  def keyname(m) when is_binary(m) do
+    try do
+      Joken.token(m) |> Joken.peek |> Map.get("sub")
+    rescue
+      ArgumentError -> nil
+    end
+  end
+  def keyname(_), do: nil
 
   defp unwrap_h(m, kl, skew, nstore) do
     jp = Joken.token(m) |> Joken.peek
@@ -83,12 +88,12 @@ defmodule Remsign.Utils do
   def cc_store_nonce(cc, n, ttl \\ 60) when is_binary(n) do
     case valid_nonce?(n) do
       true ->
-        log(:debug, "Storing nonce #{inspect(n)} in #{inspect(cc)}")
         r = case ConCache.insert_new(cc, n, %ConCache.Item{value: true, ttl: ttl}) do
               :ok -> true
-              {:error, :already_exists} -> false
+              {:error, :already_exists} ->
+                log(:debug, "Nonce #{inspect(n)} already exists in nonce cache")
+                false
             end
-        log(:debug, "Store nonce = #{inspect(r)}")
         r
       false ->
         log(:warn, "Invalid nonce format")

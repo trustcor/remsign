@@ -1,0 +1,7 @@
+---
+name: test-dealer
+algs:
+  - Ed25519
+private: test-dealer.priv
+public: test-dealer.pub
+

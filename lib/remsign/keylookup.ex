@@ -19,8 +19,9 @@ defmodule Remsign.Keylookup do
                           end
                       end
           end)
-      {:error, _} ->
-        nil
+      {:error, e} ->
+        log(:error, "Unable to search directory #{dir}: #{inspect(e)}")
+        []
     end
   end
 
@@ -128,15 +129,27 @@ defmodule Remsign.Keylookup do
   defp privkey_password(nil), do: nil
 
   defp read_private_key(c = %{}) do
-    pass = Map.get(c, "pass")
-    priv = Map.get(c, "private")
-    pk = read_private_key_h(priv, pass)
+    pk = case Map.get(c, "oct") do
+           nil -> read_private_key_h(Map.get(c, "private"), Map.get(c, "pass"))
+           s when is_binary(s) ->
+             case Base.url_decode64(s, padding: false) do
+               {:ok, b} ->
+                 {_, t} = JOSE.JWK.from_oct(b) |> JOSE.JWK.to_map
+                 log(:info, "Private symmetric key = #{inspect(t)}")
+                 t
+               :error ->
+                 log(:error, "Invalid URLsafe base64 for oct field")
+                 nil
+             end
+         end
     case pk do
       nil -> c
       p ->
-        Map.delete(c, "pass") |> Map.put("private", p)
+        Map.delete(c, "pass") |> Map.delete("oct") |> Map.put("private", p)
     end
   end
+
+  defp read_public_key_h(nil), do: nil
 
   defp read_public_key_h(pfile) do
     case File.read(pfile) do
@@ -150,7 +163,10 @@ defmodule Remsign.Keylookup do
 
   defp read_public_key(c = %{}) do
     case read_public_key_h(Map.get(c, "public")) do
-      nil -> c
+      nil -> case Map.get(c, "private") do
+               pk = %{ "kty" => "oct" } -> Map.put(c, "public", pk)
+               _ -> c # anything else, just pass through
+             end
       p -> Map.put(c, "public", p)
     end
   end
