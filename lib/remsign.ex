@@ -25,12 +25,6 @@ defmodule Remsign do
     end
   end
 
-  defp list_keys(keys) do
-    Enum.map(keys, fn k = %{ "name" => n, "private" => _pk } -> {n, Map.get(k, "public")} end) |>
-      Enum.reject(fn {_n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
-      Enum.into(%{})
-  end
-
   defp backend_name(cfg) do
     String.to_atom(to_string(cfg["ident"]) <> "." <> cfg["host"] <> "." <> to_string(cfg["port"]))
   end
@@ -57,14 +51,16 @@ defmodule Remsign do
 
     children = [
       worker(ConCache, [[ttl_check: :timer.seconds(5), ttl: :timer.seconds(ttl)], [name: :nonce_cache]]),
+      worker(Remsign.FileKeyLookup, [get_in_default(cfg, [:keys, :directory], "keys"),
+                                     get_in_default(cfg, [:keys, :extensions], [".yml"])]),
       {:broker, cfg, fn _c -> worker(Remsign.Broker, [cfg, fn kn, t -> find_key(keys, kn, t) end]) end},
       {:registrar, cfg, fn _c -> worker(Remsign.Registrar, [cfg,
-                                                            fn kn, t -> find_key(keys, kn, t) end,
+                                                            &Remsign.FileKeyLookup.lookup/2,
                                                             fn n -> store_nonce(n, ttl) end]) end},
       {:frontend, cfg, fn _c -> worker(Remsign.Frontend, [cfg]) end},
       Enum.map(Map.get(cfg, :backend, []), fn b -> worker(Remsign.Backend, [Remsign.Config.atomify(b),
-                                                                            fn kn, t -> find_key(keys, kn, t) end,
-                                                                            fn -> list_keys(keys) end
+                                                                            &Remsign.FileKeyLookup.lookup/2,
+                                                                            &Remsign.FileKeyLookup.listkeys/0
                                                                            ], id: backend_name(b)) end)
     ] |>
       List.flatten |>

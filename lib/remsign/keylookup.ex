@@ -1,6 +1,6 @@
 defmodule Remsign.Keylookup do
   @moduledoc """
-  Lookup for public/private keys for use via JWT/JOSE
+  Lookup for public/private keys for use via JWT/JOSE.
   """
   import Logger, only: [log: 2]
 
@@ -186,4 +186,60 @@ defmodule Remsign.Keylookup do
         %{}
     end
   end
+end
+
+defmodule Remsign.Lookup do
+  @callback lookup(keyname :: String.t, keytype :: atom()) :: map() | nil
+  @callback lookup(keyname :: String.t, keytype :: String.t) :: map() | nil
+  @callback listkeys() :: map()
+end
+
+defmodule Remsign.FileKeyLookup do
+  import Logger, only: [log: 2]
+  use GenServer
+  @behaviour Remsign.Lookup
+
+  def init([dir, extensions]) do
+    case File.dir?(dir) do
+      true ->
+        keys = Remsign.Keylookup.find_control_files(dir, &Remsign.Keylookup.read_yaml_file/1, extensions)
+        log(:info, "keys = #{inspect(keys)}")
+        {:ok, %{directory: dir, extensions: extensions, keys: keys}}
+      _ -> {:stop, :no_directory}
+    end
+  end
+
+  def start_link(dir), do: start_link(dir, [ ".yml" ])
+
+  def start_link(dir, extensions) do
+    GenServer.start_link __MODULE__, [dir, extensions], name: __MODULE__
+  end
+
+  def lookup(keyname, keytype) when is_atom(keytype), do: lookup(keyname, to_string(keytype))
+
+  def lookup(keyname, keytype) when is_binary(keyname) and is_binary(keytype) do
+    GenServer.call __MODULE__, {:lookup, keyname, keytype}
+  end
+
+  def listkeys() do
+    GenServer.call __MODULE__, :list_keys
+  end
+
+  def handle_call({:lookup, keyname, keytype}, _from, st) when is_binary(keyname) and is_binary(keytype) do
+    {:reply,
+     case Enum.find(st[:keys], fn %{ "name" => n } -> keyname == n end) do
+       nil -> nil
+       k -> Map.get(k, keytype)
+     end,
+     st}
+  end
+
+  def handle_call(:list_keys, _from, st) do
+    {:reply,
+     Enum.map(st[:keys], fn k = %{ "name" => n, "private" => _pk } -> {n, Map.get(k, "public")} end) |>
+       Enum.reject(fn {_n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
+       Enum.into(%{}),
+     st}
+  end
+
 end
