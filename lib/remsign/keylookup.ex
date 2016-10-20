@@ -62,17 +62,18 @@ defmodule Remsign.Keylookup do
 
   defp interpolate_item(_dir, _k, v), do: v
 
-  defp interpolate_paths(c = %{}, fpath) do
+  def interpolate_paths(c = %{}, fpath) do
     dir = Path.dirname(fpath)
     Enum.map(c, fn {k, v} -> {k, interpolate_item(dir, k, v)} end) |>
       Enum.into(%{})
   end
 
-  defp interpolate_paths(c, fpath) do
+  def interpolate_paths(c, fpath) do
     log(:error, "YAML Content from #{fpath} is not a map")
     c
   end
 
+  defp read_private_key_h(nil, _), do: nil
   defp read_private_key_h(pfile, pass) do
     case File.read(pfile) do
       {:ok, content} ->
@@ -88,7 +89,13 @@ defmodule Remsign.Keylookup do
               nil
             end
           [] ->
-            JOSE.JWK.from_openssh_key(content) |> JOSE.JWK.to_map
+	    try do
+              JOSE.JWK.from_openssh_key(content) |> JOSE.JWK.to_map
+	    rescue
+	      FunctionClauseError ->
+		log(:error, "Currently unable to load encrypted OpenSSH keys")
+	      nil
+	    end
         end
       {:error, e} ->
         log(:error, "Unable to open private key file #{pfile}: #{inspect(e)}")
@@ -142,14 +149,13 @@ defmodule Remsign.Keylookup do
              end
          end
     case pk do
-      nil -> c
+      nil -> Map.delete(c, "pass") |> Map.delete("oct") |> Map.delete("private")
       p ->
         Map.delete(c, "pass") |> Map.delete("oct") |> Map.put("private", p)
     end
   end
 
   defp read_public_key_h(nil), do: nil
-
   defp read_public_key_h(pfile) do
     case File.read(pfile) do
       {:ok, content} ->
@@ -170,7 +176,7 @@ defmodule Remsign.Keylookup do
     end
   end
 
-  defp read_keys(c = %{}) do
+  def read_keys(c = %{}) do
     read_private_key(c) |> read_public_key
   end
 
@@ -199,12 +205,62 @@ defmodule Remsign.FileKeyLookup do
   use GenServer
   @behaviour Remsign.Lookup
 
+  def read_yaml(fpath) do
+    case File.read(fpath) do
+      {:ok, content} ->
+	key = content |>
+          YamlElixir.read_from_string |>
+          Remsign.Keylookup.interpolate_paths(fpath) |>
+          Remsign.Keylookup.read_keys
+	case MapSet.new(Map.keys(key)).map do # must contain a private or public key (or both)
+	  %{ "name" => _n, "private" => _p }  -> {{fpath, Map.get(key, "name")}, key}
+	  %{ "name" => _n, "public" => _p }  -> {{fpath, Map.get(key, "name")}, key}
+	  e ->
+	    log(:error, "Unexpected key read: #{inspect(e)}")
+	    {{fpath, nil}, %{}}
+	end
+      {:error, e} ->
+        log(:error, "Unable to read YAML file #{fpath}: #{inspect(e)}")
+        {{fpath, nil}, %{}}
+    end
+  end
+
+  def watcher_loop(fkl, exts) do
+    receive do
+      {_watcher_process, {:fs, :file_event}, {changedFile, ctype}} ->
+	cf = to_string(changedFile)
+        case Enum.any?(exts, fn e -> String.ends_with?(cf, e) end) do
+	  true ->
+	    case MapSet.new(ctype).map do
+	      %{ isdir: _ } -> :ok # ignore - it's a directory
+	      %{ closed: _, modified: _ } -> GenServer.call(fkl, {:control_mod, cf})
+	      %{ deleted: _ } -> GenServer.call(fkl, {:control_del, cf})
+	      _ -> :ok # any other change - ignore
+	    end
+	  _ -> :ok # ignore file - no recognised extension
+	end
+    end
+    watcher_loop(fkl, exts)
+  end
+  
+  def watcher(fkl, exts) do
+    :fs.subscribe(:keydir_watch)
+    watcher_loop(fkl, exts)
+  end
+  
   def init([dir, extensions]) do
     case File.dir?(dir) do
       true ->
-        keys = Remsign.Keylookup.find_control_files(dir, &Remsign.Keylookup.read_yaml_file/1, extensions)
-        log(:info, "keys = #{inspect(keys)}")
-        {:ok, %{directory: dir, extensions: extensions, keys: keys}}
+        fk = Remsign.Keylookup.find_control_files(dir, &read_yaml/1, extensions)
+	{files, keys} = Enum.reject(fk, fn {{_fp, kn}, _km} -> kn == nil end ) |>
+	  Enum.unzip
+	:fs.start_link(:keydir_watch, Path.absname(dir))
+	me = self
+	spawn_link fn -> watcher(me, extensions) end
+	fmap = Enum.into(files, %{})
+	log(:info, "File map = #{inspect(fmap, pretty: true)}")
+	log(:info, "Keys = #{inspect(keys, pretty: true)}")
+        {:ok, %{directory: dir, extensions: extensions, keys: keys, files: fmap}}
       _ -> {:stop, :no_directory}
     end
   end
@@ -225,6 +281,20 @@ defmodule Remsign.FileKeyLookup do
     GenServer.call __MODULE__, :list_keys
   end
 
+  def replace_key(kl, k = %{ "name" => n }) do
+    case Enum.find_index(kl, fn %{ "name" => kn } -> kn == n end) do
+      nil -> [k | kl]
+      ndx -> List.replace_at(kl, ndx, k)
+    end
+  end
+
+  def delete_key(kl, kn) do
+    case Enum.find_index(kl, fn %{ "name" => n } -> kn == n end) do
+      nil -> kl
+      ndx -> List.delete_at(kl, ndx)
+    end
+  end
+  
   def handle_call({:lookup, keyname, keytype}, _from, st) when is_binary(keyname) and is_binary(keytype) do
     {:reply,
      case Enum.find(st[:keys], fn %{ "name" => n } -> keyname == n end) do
@@ -236,10 +306,37 @@ defmodule Remsign.FileKeyLookup do
 
   def handle_call(:list_keys, _from, st) do
     {:reply,
-     Enum.map(st[:keys], fn k = %{ "name" => n, "private" => _pk } -> {n, Map.get(k, "public")} end) |>
+     Enum.map(st[:keys],
+       fn k = %{ "name" => n, "private" => _pk } -> {n, Map.get(k, "public")}
+	 _ -> {nil, nil} end) |>
        Enum.reject(fn {_n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
        Enum.into(%{}),
      st}
   end
 
+  def handle_call({:control_mod, fpath}, _from, st) do
+    case read_yaml(fpath) do
+      {{_, nil}, _} ->
+	log(:warn, "Ignoring invalid control file")
+	{:reply, :ok, st}
+      {{_, kn}, k} ->
+	nst = put_in(st, [:files, fpath], kn) |> Map.put(:keys, replace_key(st[:keys], k))
+	{:reply, :ok, nst}
+      _ ->
+	log(:warn, "No new key found on file change")
+	{:reply, :ok, st}
+    end
+  end
+
+  def handle_call({:control_del, fpath}, _from, st) do
+    case get_in(st, [:files, fpath]) do
+      nil ->
+	log(:debug, "File #{fpath} was not in file map. Ignoring.")
+	{:reply, :ok, st}
+      kn ->
+	nst = Map.put(st, :files, Map.delete(st[:files], fpath)) |>
+	  Map.put(:keys, delete_key(st[:keys], kn))
+	{:reply, :ok, nst}
+    end
+  end
 end

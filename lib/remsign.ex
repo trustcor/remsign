@@ -29,6 +29,8 @@ defmodule Remsign do
     String.to_atom(to_string(cfg["ident"]) <> "." <> cfg["host"] <> "." <> to_string(cfg["port"]))
   end
 
+  def bstart(), do: start(:normal, "/usr/local/remsign-backend/remsign.yml")
+  def dstart(), do: start(:normal, "/usr/local/remsign/remsign.yml")
   def tstart(), do: start(:normal, "test/config.yml")
 
   def tsign(), do: Remsign.Frontend.sign("key1", "sha", "Test Sign")
