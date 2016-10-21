@@ -15,7 +15,7 @@ defmodule Remsign.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :chumak, :poison, :timex,
+    [applications: [:logger_file_backend, :logger, :chumak, :poison, :timex,
                     :briefly, :yamerl, :yaml_elixir, :con_cache,
                     :edeliver, :exactor, :joken, :jose,
                     :libdecaf, :libsodium, :honeydew, :fs ]
@@ -24,6 +24,7 @@ defmodule Remsign.Mixfile do
 
   defp deps do
     [
+      {:logger_file_backend, "~> 0.0.9"},      
       {:fs, github: "synrc/fs"},
       {:honeydew, "~> 0.0.11"},
       {:edeliver, "~> 1.4.0"},

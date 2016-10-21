@@ -107,10 +107,35 @@ defmodule TestUtils do
   def test_public_keys() do
     kns = [ "fe-key", "test-backend", "test-dealer", "key1", "key2", "key3" ]
     Enum.map(kns, fn kn -> { kn, test_key_lookup(kn, :public) } end) |>
-      Enum.reject(fn {n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
+      Enum.reject(fn {_n, k} -> k == nil or Map.get(k, "kty") == "oct" end) |>
       Enum.into(%{})
   end
 end
 
+defmodule TestKeyLookup do
+  use GenServer
+
+  def init([]) do
+    {:ok, %{}}
+  end
+
+  def start_link() do
+    GenServer.start_link __MODULE__, [], name: __MODULE__
+  end
+
+  def handle_call({:lookup, kn, kt}, _from, st) when is_binary(kt) do
+    rep = TestUtils.test_key_lookup(kn, kt)
+    {:reply, rep, st}
+  end
+
+  def handle_call({:lookup, kn, kt}, _from, st) when is_atom(kt) do
+    rep = TestUtils.test_key_lookup(kn, kt)
+    {:reply, rep, st}
+  end
+
+  def handle_call(:list_keys, _from, st) do
+    {:reply, TestUtils.test_public_keys(), st}
+  end
+end
 
 ExUnit.start()

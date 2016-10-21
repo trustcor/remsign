@@ -60,10 +60,9 @@ defmodule Remsign do
                                                             &Remsign.FileKeyLookup.lookup/2,
                                                             fn n -> store_nonce(n, ttl) end]) end},
       {:frontend, cfg, fn _c -> worker(Remsign.Frontend, [cfg]) end},
-      Enum.map(Map.get(cfg, :backend, []), fn b -> worker(Remsign.Backend, [Remsign.Config.atomify(b),
-                                                                            &Remsign.FileKeyLookup.lookup/2,
-                                                                            &Remsign.FileKeyLookup.listkeys/0
-                                                                           ], id: backend_name(b)) end)
+      Enum.map(Map.get(cfg, :backend, []), fn b -> worker(Remsign.Backend,
+       [Remsign.Config.atomify(b), Remsign.FileKeyLookup],
+       id: backend_name(b)) end)
     ] |>
       List.flatten |>
       Enum.map(&gate/1) |>

@@ -30,7 +30,8 @@ defmodule Remsign.Registrar do
     }
   end
 
-  def start_link(cfg = %{}, klf, nsf) do
+  def start_link(cfg = %{}, klf,
+                 nsf \\ fn n -> Remsign.Utils.cc_store_nonce(:nonce_cache, n) end) do
     GenServer.start_link __MODULE__, [cfg, klf, nsf], name: __MODULE__
   end
 

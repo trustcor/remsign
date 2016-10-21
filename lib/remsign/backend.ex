@@ -6,7 +6,7 @@ defmodule Remsign.Backend do
   use GenServer
   import Logger, only: [log: 2]
 
-  def init([cfg = %{}, klf, pkf]) do
+  def init([cfg = %{}, kl]) do
     sockname = to_string(cfg[:ident]) <> "." <> cfg[:host] <> "." <> to_string(cfg[:port])
     log(:debug, "Starting backend: #{sockname}")
     sock = case :chumak.socket(:req, String.to_charlist(sockname)) do
@@ -25,30 +25,26 @@ defmodule Remsign.Backend do
                 sock: sock,
                 ekpriv: priv,
                 ekpub: pub,
-                klf: klf,
-                pkf: pkf })
-        {_r, hm} = do_register(nst)
-        {:ok, Map.put(nst, :hmac, hm)}
+                kl: kl})
+        {_r, hm, be} = do_register(nst)
+        {:ok, Map.put(nst, :hmac, hm) |> Map.put(:backends, be)}
       e ->
         log(:error, "Non pong error from registrar: #{inspect(e)}")
         {:error, :no_registry_connect}
     end
   end
 
-  def start_link(cfg = %{}, klf, pkf) do
+  def start_link(cfg = %{}, kl) do
     defaults = %{
       num_workers: 5,
       sock: nil,
       host: "127.0.0.1",
       port: 25000,
       ident: "backend",
-      skew: 60
+      skew: 60,
+      nstore: fn n -> Remsign.Utils.cc_store_nonce(:nonce_cache, n) end
     }
-    GenServer.start_link __MODULE__, [ Map.merge(defaults, Remsign.Config.atomify(cfg)), klf, pkf ], name: __MODULE__
-  end
-
-  defp store_nonce(_n) do
-    true
+    GenServer.start_link __MODULE__, [ Map.merge(defaults, Remsign.Config.atomify(cfg)), kl ], name: __MODULE__
   end
 
   def hmac() do
@@ -70,7 +66,7 @@ defmodule Remsign.Backend do
 
   defp do_register_h(_, nil, st) do
     log(:error, "Unable to load private signature key: #{st[:signkey]}")
-    {nil, nil}
+    {nil, nil, nil}
   end
 
   defp do_register_h(msg, sigkey, st) do
@@ -82,8 +78,8 @@ defmodule Remsign.Backend do
     :chumak.send(st[:sock],m)
     case :chumak.recv(st[:sock]) do
       {:ok, rep} ->
-        rep = Remsign.Utils.unwrap(rep, fn k, _kt -> st[:klf].(k, :public) end, st[:skew], &store_nonce/1) |>
-          handle_register_response(st)
+        rep2 = Remsign.Utils.unwrap(rep, fn k, _kt -> GenServer.call(st[:kl], {:lookup, k, :public}) end, st[:skew], st[:nstore])
+        rep = handle_register_response(rep2, st)
         hm = Map.get(rep, "hmac_key")
         {:ok, hm} = Base.decode16(hm, case: :mixed)
         port = Map.get(rep, "port")
@@ -93,26 +89,26 @@ defmodule Remsign.Backend do
             Supervisor.Spec.worker(Remsign.BackendWorker, [{st, port, hm, n}], id: String.to_atom("Remsign.BackendWorker.#{n}"))
           end)
         Supervisor.start_link(children, strategy: :one_for_one)
-        {rep, hm}
+        {rep, hm, children}
       e ->
         log(:error, "Unexpected reply from register: #{inspect(e)}")
-        {nil, nil}
+        {nil, nil, nil}
     end
   end
 
   def do_register(st) do
     msg = %{ command: "register",
              params: %{
-               pubkeys: st[:pkf].(),
+               pubkeys: GenServer.call(st[:kl], :list_keys),
                ekey: st[:ekpub]
              }
            }
-    sigkey = st[:klf].(st[:signkey], :private)
+    sigkey = GenServer.call(st[:kl], {:lookup, st[:signkey], :private})
     do_register_h(msg, sigkey, st)
   end
 
   def handle_call({:store_nonce, n}, _from, st) do
-    {:reply, store_nonce(n), st}
+    {:reply, st[:nstore].(n), st}
   end
 
   def handle_call(:hmac, _from, st) do
@@ -158,7 +154,7 @@ defmodule Remsign.BackendWorker do
       nil ->
         Poison.encode!(%{ error: :unknown_digest_type })
       alg when is_atom(alg) ->
-        case st[:klf].(kname, :private) do
+        case GenServer.call(st[:kl], {:lookup, kname, :private}) do
           nil ->
             Poison.encode!(%{ error: :unknown_key })
           km ->

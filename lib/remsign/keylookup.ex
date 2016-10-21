@@ -242,12 +242,12 @@ defmodule Remsign.FileKeyLookup do
     end
     watcher_loop(fkl, exts)
   end
-  
+
   def watcher(fkl, exts) do
     :fs.subscribe(:keydir_watch)
     watcher_loop(fkl, exts)
   end
-  
+
   def init([dir, extensions]) do
     case File.dir?(dir) do
       true ->
@@ -294,14 +294,20 @@ defmodule Remsign.FileKeyLookup do
       ndx -> List.delete_at(kl, ndx)
     end
   end
-  
+
+  defp do_lookup(keyname, keytype, st) do
+    case Enum.find(st[:keys], fn %{ "name" => n } -> keyname == n end) do
+      nil -> nil
+      k -> Map.get(k, keytype)
+    end
+  end
+
+  def handle_call({:lookup, keyname, keytype}, _from, st) when is_binary(keyname) and is_atom(keytype) do
+    {:reply, do_lookup(keyname, to_string(keytype), st), st}
+  end
+
   def handle_call({:lookup, keyname, keytype}, _from, st) when is_binary(keyname) and is_binary(keytype) do
-    {:reply,
-     case Enum.find(st[:keys], fn %{ "name" => n } -> keyname == n end) do
-       nil -> nil
-       k -> Map.get(k, keytype)
-     end,
-     st}
+    {:reply, do_lookup(keyname, keytype, st), st}
   end
 
   def handle_call(:list_keys, _from, st) do

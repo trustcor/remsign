@@ -27,6 +27,7 @@ defmodule RemsignBrokerTest do
       Enum.each([:con_cache, :chumak], fn a -> Application.stop(a) end)
     end
 
+    {:ok, kl} = TestKeyLookup.start_link()
     {:ok, _pid} = Remsign.Broker.start_link(cfg, &test_key_lookup/2)
     {:ok, a} = Agent.start_link(fn -> MapSet.new() end)
 
@@ -39,11 +40,12 @@ defmodule RemsignBrokerTest do
         signkey: "test-backend",
         signalg: "Ed25519",
         host: get_in(cfg, [:registrar, :addr]),
-        port: get_in(cfg, [:registrar, :port])
-      }, &test_key_lookup/2, &test_public_keys/0
+        port: get_in(cfg, [:registrar, :port]),
+        nstore: fn n -> Remsign.Utils.cc_store_nonce(cc, n) end
+      }, TestKeyLookup
     )
 
-    [ cfg: cfg, nag: a, pid: pid, cc: cc ]
+    [ cfg: cfg, nag: a, pid: pid, cc: cc, kl: kl ]
   end
 
   test "connect to broker", ctx do

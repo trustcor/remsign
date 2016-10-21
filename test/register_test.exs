@@ -30,11 +30,11 @@ defmodule RemsignBackendTest do
     on_exit fn ->
       Enum.each([:con_cache, :chumak], fn a -> Application.stop(a) end)
     end
-
+    {:ok, kl} = TestKeyLookup.start_link()
     {:ok, cc} = ConCache.start(name: :test_nonce_cc)
     {:ok, pid} = Remsign.Registrar.start_link( cfg, &test_key_lookup/2,
       fn n -> Remsign.Utils.cc_store_nonce(cc, n) end )
-    [ cfg: cfg, nag: a, pid: pid, cc: cc ]
+    [ cfg: cfg, nag: a, pid: pid, cc: cc, kl: kl ]
   end
 
   test "registrar backend comms", ctx do
@@ -45,9 +45,10 @@ defmodule RemsignBackendTest do
         signalg: "Ed25519",
         host: get_in(ctx, [:cfg, :registrar, :addr]),
         port: get_in(ctx, [:cfg, :registrar, :port]),
-        num_workers: 1
+        num_workers: 1,
+        nstore: fn n -> Remsign.Utils.cc_store_nonce(ctx[:cc], n) end
       },
-      &test_key_lookup/2, &test_public_keys/0
+      TestKeyLookup
     )
     assert Remsign.Registrar.ping() == "pong"
   end
@@ -59,7 +60,8 @@ defmodule RemsignBackendTest do
       signalg: "Ed25519",
       host: get_in(ctx, [:cfg, :registrar, :addr]),
       port: get_in(ctx, [:cfg, :registrar, :port]),
-      num_workers: 1
+      num_workers: 1,
+      nstore: fn n -> Remsign.Utils.cc_store_nonce(ctx[:cc], n) end
     }
   end
 
@@ -88,27 +90,27 @@ defmodule RemsignBackendTest do
   def zd, do: << 0 :: 160 >> |> Base.encode16(case: :lower)
 
   test "registrar backend signing with unknown hash", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), &test_key_lookup/2, &test_public_keys/0)
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
     assert Remsign.Registrar.sign("key1", :bad_hash, zd) == {:error, :unknown_digest_type}
   end
 
   test "registrar backend with unknown key", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), &test_key_lookup/2, &test_public_keys/0)
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
     assert Remsign.Registrar.sign("bad-key", :sha, zd) == {nil, {:error, :unknown_key}}
   end
 
   test "registrar backend signing (ECDSA)", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), &test_key_lookup/2, &test_public_keys/0)
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
     assert_valid_sig(ctx, "key2")
   end
 
   test "registrar backend signing (RSA)", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), &test_key_lookup/2, &test_public_keys/0)
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
     assert_valid_sig(ctx, "key1")
   end
 
   test "registrar backend signing (Ed25519)", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), &test_key_lookup/2, &test_public_keys/0)
+    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
     assert_valid_sig(ctx, "key3")
   end
 
