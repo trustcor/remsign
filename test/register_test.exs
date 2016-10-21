@@ -66,7 +66,7 @@ defmodule RemsignBackendTest do
   end
 
   def assert_valid_sig(ctx, kn) do
-    hm = Remsign.Backend.hmac()
+    hm = Remsign.Backend.hmac(kn)
     d = zd
     {_hmk, rep} = Remsign.Registrar.sign(kn, :sha, d)
     case Poison.decode(rep) do
