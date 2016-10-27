@@ -138,7 +138,7 @@ defmodule Remsign.Backend do
             case Base.decode16(kh, case: :mixed) do
               {:ok, k} ->
                 kn = get_in(msg, [:params, :name])
-                log(:info, "Port for kn #{kn} port = #{port}, hmac = #{inspect(k)}")
+                log(:debug, "Port for kn #{kn} port = #{port}, hmac = #{inspect(k)}")
                 Enum.each(Supervisor.which_children(st[:supervisor]),
                   fn {_, cpid, _, _} -> GenServer.call(cpid, {:add_dealer, kn, port, k}) end)
               _ -> nil
@@ -161,9 +161,9 @@ defmodule Remsign.Backend do
                ekey: st[:ekpub]
             }
           }
-   log(:info, "Looking up signing key #{st[:signkey]}")
+   log(:debug, "Looking up signing key #{st[:signkey]}")
    sigkey = GenServer.call(st[:kl], {:lookup, st[:signkey], :private})
-   log(:info, "Signing add_key with #{inspect(sigkey)}")
+   log(:debug, "Signing add_key with #{inspect(sigkey)}")
 
    do_add_key_h(msg, sigkey, st)
   end
@@ -181,12 +181,12 @@ defmodule Remsign.Backend do
   end
 
   def handle_call({:add_key, kn, pk}, _from, st) when is_binary(kn) do
-    log(:info, "Adding key #{kn}")
+    log(:debug, "Adding key #{kn}")
     {:reply, do_add_key(kn, pk, st), st}
   end
 
   def handle_call({:del_key, kn}, _from, st) when is_binary(kn) do
-    log(:info, "Deleting key #{kn}")
+    log(:debug, "Deleting key #{kn}")
     {:reply, :ok, st}
   end
 end
@@ -212,7 +212,7 @@ defmodule Remsign.BackendWorker do
 
   def init({st, dealers, n}) do
     socks = Enum.map(dealers, fn {kn, {port, k}} -> {kn, make_sock(st[:host], port, k)} end) |> Enum.into(%{})
-    log(:info, "Starting backend worker #{inspect(n)} on #{inspect(socks)}")
+    log(:debug, "Starting backend worker #{inspect(n)} on #{inspect(socks)}")
     me = self
     _pids = Enum.map(socks, fn {_kn, {sock, k, wid}} -> spawn_link(fn -> listener(sock, k, wid, me, st) end) end)
     {:ok, Map.merge(st, %{socks: socks, parent: me})}
@@ -228,7 +228,7 @@ defmodule Remsign.BackendWorker do
   defp do_sign(d, _alg, %{kty: :jose_jwk_kty_okp_ed25519}, k), do: :jose_curve25519.ed25519_sign(d, k)
 
   defp command_reply("sign", %{ "keyname" => kname, "hash_type" => htype, "digest" => digest }, hm, st ) do
-    log(:info, "Got sign request for #{inspect(kname)}")
+    log(:debug, "Got sign request for #{inspect(kname)}")
     case Remsign.Utils.known_hash(htype) do
       nil ->
         Poison.encode!(%{ error: :unknown_digest_type })
@@ -266,12 +266,12 @@ defmodule Remsign.BackendWorker do
   defp listener(sock, hm, wid, parent, st) do
     case :chumak.recv(sock) do
       {:ok, "ping"} ->
-        log(:info, "Ping message received on #{wid}")
+        log(:debug, "Ping message received on #{wid}")
         send parent, {:reply, sock, "pong"}
       {:ok, m} ->
         send parent, {:reply, sock, handle_message(m, hm, st)}
       e ->
-        log(:info, "Unknown message received on #{wid}: #{inspect(e)}")
+        log(:warn, "Unknown message received on #{wid}: #{inspect(e)}")
         send parent, {:reply, sock, Poison.encode(%{ error: :unknown_command })}
     end
     listener(sock, hm, wid, parent, st)

@@ -61,7 +61,7 @@ defmodule Remsign.Pubkey do
                "crv" => "Ed25519",
                "x" => Base.url_encode64(:binary.encode_unsigned(pubkey), padding: false) }
           s ->
-            log(:info, "Ill-formed Ed25519 key #{inspect(pkdata)} -> #{inspect(s)}")
+            log(:warn, "Ill-formed Ed25519 key #{inspect(pkdata)} -> #{inspect(s)}")
             nil
         end
       _e ->
@@ -80,7 +80,7 @@ defmodule Remsign.Pubkey do
                "x" => Base.url_encode64(:binary.encode_unsigned(x), padding: false),
                "y" => Base.url_encode64(:binary.encode_unsigned(y), padding: false) }
           s ->
-            log(:info, "Ill-formed EcDSA key #{inspect(pkdata)} -> #{inspect(s)}")
+            log(:warn, "Ill-formed EcDSA key #{inspect(pkdata)} -> #{inspect(s)}")
             nil
         end
       _e ->

@@ -168,12 +168,10 @@ defmodule Remsign.Registrar do
                                    hash_type: htype,
                                    digest: digest } } } |>
       Remsign.Utils.wrap("backend-hmac", "HS256", hmk)
-    log(:info, "sending sign message for #{inspect(kname)} for message #{inspect(msg)} to #{inspect(dsock)}/#{inspect(dport)}")
     case :chumak.send_multipart(dsock, ["", msg]) do
       :ok ->
         case :chumak.recv_multipart(dsock) do
           {:ok, ["", r] } ->
-            log(:info, "Got reply #{inspect(r)} from backend")
             {hmk, r}
           e ->
             log(:error, "Unexpected reply from backend: #{inspect(e)}")
@@ -221,7 +219,7 @@ defmodule Remsign.Registrar do
             {:ok, ["", r = "pong"]} ->
               r
             e ->
-              log(:info, "Reply to dealer socket: #{inspect(e)}")
+              log(:warn, "Reply to dealer socket: #{inspect(e)}")
               {:error, :unexpected_reply}
           end
     {:reply, rep, st}

@@ -46,7 +46,7 @@ defmodule Remsign.FileReader do
   end
 
   def readlines_s(fname, e = {:error, _reason}) do
-    log(:info, "Error on readlines for #{fname}: #{inspect(e)}")
+    log(:warn, "Error on readlines for #{fname}: #{inspect(e)}")
     e
   end
   def readlines_s(fname, {:ok, cont}) do
