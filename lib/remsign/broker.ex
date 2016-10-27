@@ -30,6 +30,7 @@ defmodule Remsign.Broker do
       end
 
   def process_sign_message(sock, client, client_key, htype, digest, kid, st) do
+    log(:info, "Requesting signature using #{inspect(kid)} from registrar")
     {hmk, res} = Remsign.Registrar.sign(kid, htype, digest)
     rep = case res do
       {:error, e} -> Poison.encode!(%{error: e})

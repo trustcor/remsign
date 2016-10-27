@@ -96,7 +96,7 @@ defmodule Remsign.Pubkey do
           :public_key.der_decode(:SubjectPublicKeyInfo, spki)
         get_public_key_from_bits(algid, spbits, parms) |> joken_key
       [{:RSAPublicKey, bits, _}] ->
-        pk = {:RSAPublicKey, n, e} = :public_key.der_decode(:RSAPublicKey, bits)
+        pk = {:RSAPublicKey, _n, _e} = :public_key.der_decode(:RSAPublicKey, bits)
         joken_key({pk, nil})
       [] ->
         # try openssh pubkey format

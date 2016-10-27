@@ -136,6 +136,18 @@ defmodule TestKeyLookup do
   def handle_call(:list_keys, _from, st) do
     {:reply, TestUtils.test_public_keys(), st}
   end
+
+  def handle_call(:backend, _from, st) do
+    {:reply, st[:backend], st}
+  end
+
+  def handle_call({:set_backend, be}, _from, st) do
+    {:reply, :ok, Map.put(st, :backend, be)}
+  end
+
+  def backend(), do: GenServer.call __MODULE__, :backend
+  def set_backend(be), do: GenServer.call __MODULE__, {:set_backend, be}
+
 end
 
 ExUnit.start()

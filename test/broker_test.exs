@@ -34,7 +34,7 @@ defmodule RemsignBrokerTest do
     {:ok, pid} = Remsign.Registrar.start_link( cfg, &test_key_lookup/2,
       fn n -> Remsign.Utils.cc_store_nonce(cc, n) end )
 
-    {:ok, _be} = Remsign.Backend.start_link(
+    {:ok, be} = Remsign.Backend.start_link(
       %{
         ident: "test-backend",
         signkey: "test-backend",
@@ -44,6 +44,7 @@ defmodule RemsignBrokerTest do
         nstore: fn n -> Remsign.Utils.cc_store_nonce(cc, n) end
       }, TestKeyLookup
     )
+    :ok = TestKeyLookup.set_backend(be)
 
     [ cfg: cfg, nag: a, pid: pid, cc: cc, kl: kl ]
   end

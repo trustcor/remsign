@@ -198,6 +198,8 @@ defmodule Remsign.Lookup do
   @callback lookup(keyname :: String.t, keytype :: atom()) :: map() | nil
   @callback lookup(keyname :: String.t, keytype :: String.t) :: map() | nil
   @callback listkeys() :: map()
+  @callback backend() :: any
+  @callback set_backend(backend :: any) :: :ok
 end
 
 defmodule Remsign.FileKeyLookup do
@@ -225,6 +227,13 @@ defmodule Remsign.FileKeyLookup do
     end
   end
 
+  defp signal_add_key({nil, _}, _), do: :ok
+  defp signal_add_key({_, _}, nil), do: :ok
+  defp signal_add_key({k, pk}, b), do: GenServer.call(b, {:add_key, k, pk})
+  defp signal_del_key(nil, _), do: :ok
+  defp signal_del_key(_, nil), do: :ok
+  defp signal_del_key(k, b), do: GenServer.call(b, {:del_key, k})
+
   def watcher_loop(fkl, exts) do
     receive do
       {_watcher_process, {:fs, :file_event}, {changedFile, ctype}} ->
@@ -233,8 +242,12 @@ defmodule Remsign.FileKeyLookup do
 	  true ->
 	    case MapSet.new(ctype).map do
 	      %{ isdir: _ } -> :ok # ignore - it's a directory
-	      %{ closed: _, modified: _ } -> GenServer.call(fkl, {:control_mod, cf})
-	      %{ deleted: _ } -> GenServer.call(fkl, {:control_del, cf})
+	      %{ closed: _, modified: _ } ->
+          GenServer.call(fkl, {:control_mod, cf}) |>
+            signal_add_key(GenServer.call(fkl, :backend))
+	      %{ deleted: _ } ->
+          GenServer.call(fkl, {:control_del, cf}) |>
+            signal_del_key(GenServer.call(fkl, :backend))
 	      _ -> :ok # any other change - ignore
 	    end
 	  _ -> :ok # ignore file - no recognised extension
@@ -252,15 +265,21 @@ defmodule Remsign.FileKeyLookup do
     case File.dir?(dir) do
       true ->
         fk = Remsign.Keylookup.find_control_files(dir, &read_yaml/1, extensions)
-	{files, keys} = Enum.reject(fk, fn {{_fp, kn}, _km} -> kn == nil end ) |>
-	  Enum.unzip
-	:fs.start_link(:keydir_watch, Path.absname(dir))
-	me = self
-	spawn_link fn -> watcher(me, extensions) end
-	fmap = Enum.into(files, %{})
-	log(:info, "File map = #{inspect(fmap, pretty: true)}")
-	log(:info, "Keys = #{inspect(keys, pretty: true)}")
-        {:ok, %{directory: dir, extensions: extensions, keys: keys, files: fmap}}
+        {files, keys} = Enum.reject(fk, fn {{_fp, kn}, _km} -> kn == nil end ) |>
+          Enum.unzip
+        :fs.start_link(:keydir_watch, Path.absname(dir))
+        me = self
+        spawn_link fn -> watcher(me, extensions) end
+        fmap = Enum.into(files, %{})
+        {:ok,
+          %{
+            directory: dir,
+            extensions: extensions,
+            keys: keys,
+            files: fmap,
+            backend: nil
+          }
+        }
       _ -> {:stop, :no_directory}
     end
   end
@@ -270,6 +289,10 @@ defmodule Remsign.FileKeyLookup do
   def start_link(dir, extensions) do
     GenServer.start_link __MODULE__, [dir, extensions], name: __MODULE__
   end
+
+  def set_backend(be), do: GenServer.call __MODULE__, {:set_backend, be}
+
+  def backend(), do: GenServer.call __MODULE__, :backend
 
   def lookup(keyname, keytype) when is_atom(keytype), do: lookup(keyname, to_string(keytype))
 
@@ -283,8 +306,10 @@ defmodule Remsign.FileKeyLookup do
 
   def replace_key(kl, k = %{ "name" => n }) do
     case Enum.find_index(kl, fn %{ "name" => kn } -> kn == n end) do
-      nil -> [k | kl]
-      ndx -> List.replace_at(kl, ndx, k)
+      nil ->
+        [k | kl]
+      ndx ->
+        List.replace_at(kl, ndx, k)
     end
   end
 
@@ -323,26 +348,32 @@ defmodule Remsign.FileKeyLookup do
   def handle_call({:control_mod, fpath}, _from, st) do
     case read_yaml(fpath) do
       {{_, nil}, _} ->
-	log(:warn, "Ignoring invalid control file")
-	{:reply, :ok, st}
+	       log(:warn, "Ignoring invalid control file")
+         {:reply, {nil, nil}, st}
       {{_, kn}, k} ->
-	nst = put_in(st, [:files, fpath], kn) |> Map.put(:keys, replace_key(st[:keys], k))
-	{:reply, :ok, nst}
+	       nst = put_in(st, [:files, fpath], kn) |> Map.put(:keys, replace_key(st[:keys], k))
+         {:reply, {kn, Map.get(k, "public")}, nst}
       _ ->
-	log(:warn, "No new key found on file change")
-	{:reply, :ok, st}
+        log(:warn, "No new key found on file change")
+        {:reply, {nil, nil}, st}
     end
   end
 
   def handle_call({:control_del, fpath}, _from, st) do
     case get_in(st, [:files, fpath]) do
       nil ->
-	log(:debug, "File #{fpath} was not in file map. Ignoring.")
-	{:reply, :ok, st}
+        log(:debug, "File #{fpath} was not in file map. Ignoring.")
+        {:reply, nil, st}
       kn ->
-	nst = Map.put(st, :files, Map.delete(st[:files], fpath)) |>
-	  Map.put(:keys, delete_key(st[:keys], kn))
-	{:reply, :ok, nst}
+        nst = Map.put(st, :files, Map.delete(st[:files], fpath)) |>
+          Map.put(:keys, delete_key(st[:keys], kn))
+        {:reply, kn, nst}
     end
+  end
+
+  def handle_call(:backend, _from, st), do: {:reply, st[:backend], st}
+
+  def handle_call({:set_backend, be}, _from, st) do
+    {:reply, :ok, Map.put(st, :backend, be)}
   end
 end
