@@ -11,8 +11,8 @@ defmodule Remsign.Broker do
   """
 
   def init([%{ broker: bcfg}, klf ]) do
-    {:ok, sock} = :chumak.socket(:router)
-    case :chumak.bind(sock, :tcp, String.to_charlist(bcfg[:host]), bcfg[:port]) do
+    {:ok, sock} = ExChumak.socket(:router)
+    case ExChumak.bind(sock, :tcp, String.to_charlist(bcfg[:host]), bcfg[:port]) do
       {:ok, _bpid} ->
         st = %{ sock: sock,
                 dealers: %{},
@@ -40,16 +40,15 @@ defmodule Remsign.Broker do
             p = Remsign.Utils.unwrap(res, fn _k, :public -> hmk end,
             st[:skew],
             fn n -> Remsign.Utils.cc_store_nonce(st[:cc], n) end)
-
             sig = st[:klf].(client_key, "private") |> JOSE.JWK.from_map
             Remsign.Utils.wrap(%{ payload: p }, client_key, "HS256", sig)
         end
     end
-    :chumak.send_multipart(sock, [client, "", rep])
+    ExChumak.send_multipart(sock, [client, "", rep])
   end
 
   def listener(sock, st) do
-    case :chumak.recv_multipart(sock) do
+    case ExChumak.recv_multipart(sock) do
       {:ok, [client, "", msg]} ->
         case valid_message?(msg, st) do
           {:ok, %{ "command" => "sign", "parms" => %{ "hash_type" => htype, "digest" => digest, "keyname" => kid } }, ck } ->
@@ -57,7 +56,7 @@ defmodule Remsign.Broker do
             :ok
           em = %{error: e} ->
             log(:error, "Malformed message : #{inspect(e)}")
-            :chumak.send_multipart(sock, [client, "", Poison.encode!(em)])
+            ExChumak.send_multipart(sock, [client, "", Poison.encode!(em)])
         end
     end
     listener(sock, st)

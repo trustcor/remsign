@@ -29,11 +29,12 @@ defmodule Remsign do
     String.to_atom(to_string(cfg["ident"]) <> "." <> cfg["host"] <> "." <> to_string(cfg["port"]))
   end
 
+  def fstart(), do: start(:normal, "/usr/local/remsign-frontend/remsign.yml")
   def bstart(), do: start(:normal, "/usr/local/remsign-backend/remsign.yml")
   def dstart(), do: start(:normal, "/usr/local/remsign/remsign.yml")
   def tstart(), do: start(:normal, "test/config.yml")
 
-  def tsign(), do: Remsign.Frontend.sign("key1", "sha", "Test Sign")
+  def tsign(), do: Remsign.Frontend.sign("testkey", "sha", "Test Sign")
 
   def start(type), do: start(type, %{})
 
@@ -44,6 +45,8 @@ defmodule Remsign do
   def start(_type, cfg) when is_map(cfg) do
     import Supervisor.Spec, warn: false
 
+    Application.start(:chumak)
+    ExChumak.start
     skew = Map.get(cfg, :skew, 30)
     ttl = 2 * skew
     keys = Remsign.Keylookup.find_control_files(

@@ -5,10 +5,10 @@ defmodule Remsign.Registrar do
   import Remsign.Utils, only: [get_in_default: 3]
 
   def init([cfg, klf, nsf]) do
-    {:ok, sock} = :chumak.socket(:rep)
+    {:ok, sock} = ExChumak.socket(:rep)
     addr = get_in_default(cfg, [:registrar, :addr], "0.0.0.0") |> String.to_charlist
     port = get_in_default(cfg, [:registrar, :port], 19999)
-    pid = case :chumak.bind(sock, :tcp, addr, port) do
+    pid = case ExChumak.bind(sock, :tcp, addr, port) do
             {:ok, spid} ->
               log(:debug, "Bound registrar to #{inspect(addr)}/#{inspect(port)}")
               spid
@@ -35,7 +35,7 @@ defmodule Remsign.Registrar do
   end
 
   defp listener(sock) do
-    case :chumak.recv(sock) do
+    case ExChumak.recv(sock) do
       {:ok, msg} ->
         GenServer.cast(__MODULE__, {:message, msg})
       e ->
@@ -91,7 +91,6 @@ defmodule Remsign.Registrar do
       fn {kn, _pk}, {st, kl} -> {nst, dport, sk} = new_dealer(st, kn); {nst, [{kn, %{ port: dport, hmac: sk}} | kl]} end)
     {:ok, plaintext} = Poison.encode(%{ dealers: Enum.into(repl, %{})})
     {_alg, enc} = JOSE.JWE.block_encrypt(pub, plaintext, %{ "alg" => "RSA-OAEP", "enc" => "ChaCha20/Poly1305" })
-    log(:debug, "K2D = #{inspect(st[:k2d], pretty: true)}")
     {st, %{ command: :register, response: enc }}
   end
 
@@ -150,13 +149,13 @@ defmodule Remsign.Registrar do
       %Joken.Token{error: nil} ->
         log(:debug, "Message verify => #{inspect(ver)}")
         {nst, rep} = command_reply(st, ver.claims)
-        :chumak.send(st[:sock], envelope(st, rep))
+        ExChumak.send(st[:sock], envelope(st, rep))
         nst
       %Joken.Token{error: "Invalid signature"} ->
-        :chumak.send(st[:sock], Poison.encode!(%{ error: :invalid_signature }))
+        ExChumak.send(st[:sock], Poison.encode!(%{ error: :invalid_signature }))
         st
       %Joken.Token{error: "Invalid payload"} ->
-        :chumak.send(st[:sock], Poison.encode!(%{ error: :invalid_payload }))
+        ExChumak.send(st[:sock], Poison.encode!(%{ error: :invalid_payload }))
         st
     end
   end
@@ -168,9 +167,9 @@ defmodule Remsign.Registrar do
                                    hash_type: htype,
                                    digest: digest } } } |>
       Remsign.Utils.wrap("backend-hmac", "HS256", hmk)
-    case :chumak.send_multipart(dsock, ["", msg]) do
+    case ExChumak.send_multipart(dsock, ["", msg]) do
       :ok ->
-        case :chumak.recv_multipart(dsock) do
+        case ExChumak.recv_multipart(dsock) do
           {:ok, ["", r] } ->
             {hmk, r}
           e ->
@@ -183,7 +182,7 @@ defmodule Remsign.Registrar do
   end
 
   def handle_cast({:message, "ping"}, st) do
-    :chumak.send(st[:sock], "pong")
+    ExChumak.send(st[:sock], "pong")
     {:noreply, st}
   end
 
@@ -193,7 +192,7 @@ defmodule Remsign.Registrar do
            {:ok, _dm} ->
              handle_message(st, m)
            {:error, e} ->
-             :chumak.send(st[:sock], Poison.encode!(%{ error: e }))
+             ExChumak.send(st[:sock], Poison.encode!(%{ error: e }))
              st
          end
     {:noreply, st}
@@ -214,8 +213,8 @@ defmodule Remsign.Registrar do
     [d] = Enum.take_random(Map.keys(st[:k2d]), 1)
     dsock = Map.get(st[:k2d], d) |> elem(1)
 
-    :ok = :chumak.send_multipart(dsock, ["", "ping"])
-    rep = case :chumak.recv_multipart(dsock) do
+    :ok = ExChumak.send_multipart(dsock, ["", "ping"])
+    rep = case ExChumak.recv_multipart(dsock) do
             {:ok, ["", r = "pong"]} ->
               r
             e ->

@@ -40,7 +40,7 @@ defmodule RemsignBackendTest do
   test "registrar backend comms", ctx do
     {:ok, _be} = Remsign.Backend.start_link(
       %{
-        ident: "test-backend",
+        ident: "TestBackend",
         signkey: "test-backend",
         signalg: "Ed25519",
         host: get_in(ctx, [:cfg, :registrar, :addr]),
@@ -55,7 +55,7 @@ defmodule RemsignBackendTest do
 
   def kconfig(ctx) do
     %{
-      ident: "test-backend",
+      ident: "TestBackend",
       signkey: "test-backend",
       signalg: "Ed25519",
       host: get_in(ctx, [:cfg, :registrar, :addr]),
@@ -65,8 +65,8 @@ defmodule RemsignBackendTest do
     }
   end
 
-  def assert_valid_sig(ctx, kn) do
-    hm = Remsign.Backend.hmac(kn)
+  def assert_valid_sig(ctx, be, kn) do
+    hm = Remsign.Backend.hmac(be, kn)
     d = zd
     {_hmk, rep} = Remsign.Registrar.sign(kn, :sha, d)
     case Poison.decode(rep) do
@@ -100,18 +100,18 @@ defmodule RemsignBackendTest do
   end
 
   test "registrar backend signing (ECDSA)", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
-    assert_valid_sig(ctx, "key2")
+    {:ok, be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
+    assert_valid_sig(ctx, be, "key2")
   end
 
   test "registrar backend signing (RSA)", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
-    assert_valid_sig(ctx, "key1")
+    {:ok, be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
+    assert_valid_sig(ctx, be, "key1")
   end
 
   test "registrar backend signing (Ed25519)", ctx do
-    {:ok, _be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
-    assert_valid_sig(ctx, "key3")
+    {:ok, be} = Remsign.Backend.start_link(kconfig(ctx), TestKeyLookup)
+    assert_valid_sig(ctx, be, "key3")
   end
 
 end

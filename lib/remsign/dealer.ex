@@ -20,7 +20,7 @@ defmodule Remsign.Dealer do
 
   def alloc(cfg = %{}) do
     p = allocate_port(Map.get(cfg, :port_agent), Map.get(cfg, :base_port, 20000))
-    case :chumak.socket(:dealer) do
+    case ExChumak.socket(:dealer) do
       {:ok, dsock} ->
         case :chumak.bind(dsock, :tcp,
               Map.get(cfg, :bind_addr, "0.0.0.0") |> String.to_charlist,

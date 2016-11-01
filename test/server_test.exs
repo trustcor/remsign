@@ -70,7 +70,7 @@ defmodule RemsignServerTest do
     {:ok, _pid} = Remsign.Registrar.start_link( ctx[:cfg], &test_key_lookup/2,
       fn n -> test_nonce_store(ctx[:nag], n) end )
 
-    sock = case :chumak.socket(:req, 'test-reg-ident') do
+    sock = case ExChumak.socket(:req, 'test-reg-ident') do
              {:error, {:already_started, sockpid}} -> sockpid
              {:ok, sockpid} -> sockpid
              e ->

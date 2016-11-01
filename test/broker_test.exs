@@ -50,7 +50,7 @@ defmodule RemsignBrokerTest do
   end
 
   test "connect to broker", ctx do
-    {:ok, sock} = :chumak.socket(:req, String.to_charlist("test-client"))
+    {:ok, sock} = ExChumak.socket(:req, String.to_charlist("test-client"))
     case :chumak.connect(sock, :tcp, String.to_charlist( get_in(ctx, [:cfg, :broker, :host] )),
           get_in(ctx, [:cfg, :broker, :port])) do
       {:ok, _pid} ->
@@ -75,7 +75,7 @@ defmodule RemsignBrokerTest do
   def do_verify(_, k, sig), do: :public_key.verify("Test-String", :sha, sig, k)
 
   def run_sign_test(ctx, kty, kn) do
-    {:ok, sock} = :chumak.socket(:req, String.to_charlist("test-client"))
+    {:ok, sock} = ExChumak.socket(:req, String.to_charlist("test-client"))
     case :chumak.connect(sock, :tcp, String.to_charlist( get_in(ctx, [:cfg, :broker, :host] )),
           get_in(ctx, [:cfg, :broker, :port])) do
       {:ok, _pid} ->

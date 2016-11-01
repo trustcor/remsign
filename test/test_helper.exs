@@ -150,4 +150,5 @@ defmodule TestKeyLookup do
 
 end
 
+ExChumak.start()
 ExUnit.start()
