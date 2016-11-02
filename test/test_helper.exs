@@ -150,6 +150,5 @@ defmodule TestKeyLookup do
 
 end
 
-Application.start(YamlElixir)
 ExChumak.start()
 ExUnit.start()
