@@ -25,7 +25,7 @@ defmodule Remsign.Mixfile do
   defp deps do
     [
       {:logger_file_backend, "~> 0.0.9"},      
-      {:fs, "~> 0.9.1"},
+      {:fs, github: "synrc/fs"},
       {:honeydew, "~> 0.0.11"},
       {:edeliver, "~> 1.4.0"},
       {:distillery, "~> 0.10.1"},
