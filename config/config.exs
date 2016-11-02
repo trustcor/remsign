@@ -2,6 +2,8 @@
 # and its dependencies with the aid of the Mix.Config module.
 use Mix.Config
 
+config :yamerl, :node_mods, []
+
 config :logger, [
   backends: [{LoggerFileBackend, :remsign_log}]
 ]

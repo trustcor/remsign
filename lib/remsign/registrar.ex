@@ -160,7 +160,7 @@ defmodule Remsign.Registrar do
     end
   end
 
-  def send_sign_message({dport, dsock, hm}, kname, htype, digest) do
+  def send_sign_message({_dport, dsock, hm}, kname, htype, digest) do
     hmk = JOSE.JWK.from_oct(hm)
     msg = %{ payload: %{ command: :sign,
                          parms: %{ keyname: kname,

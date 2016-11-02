@@ -33,7 +33,7 @@ defmodule Remsign.Mixfile do
       {:jose, "~> 1.8.0"},
       {:libsodium, "~> 0.0.8"},
       {:libdecaf, "~> 0.0.4"},
-      {:poison, "~> 2.0.0"},
+      {:poison, "~> 2.2.0"},
       {:joken, "~> 1.3.1"},
       {:timex, "~> 3.0.0"},
       {:briefly, "~> 0.3.0"},
