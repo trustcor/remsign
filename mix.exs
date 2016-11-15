@@ -18,7 +18,7 @@ defmodule Remsign.Mixfile do
     [applications: [:logger_file_backend, :logger, :chumak, :poison, :timex,
                     :briefly, :yamerl, :yaml_elixir, :con_cache,
                     :edeliver, :exactor, :joken, :jose,
-                    :libdecaf, :libsodium, :honeydew, :fs ]
+                    :honeydew, :fs ]
     ]
   end
 
@@ -31,8 +31,6 @@ defmodule Remsign.Mixfile do
       {:distillery, "~> 0.10.1"},
       {:chumak, "~> 1.1"},
       {:jose, "~> 1.8.0"},
-      {:libsodium, "~> 0.0.8"},
-      {:libdecaf, "~> 0.0.4"},
       {:poison, "~> 2.2.0"},
       {:joken, "~> 1.3.1"},
       {:timex, "~> 3.1.0"},
